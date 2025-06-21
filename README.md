@@ -27,8 +27,8 @@ The line body then follows as a token stream, with bytes `20` to `7E` (hexadecim
 Each line is then terminated by a null byte.
 
 The last line is followed by a 16-bit null word, an impossible byte length for a line (it is always at least 2 bytes long).
-Then the section containing identifier names follow.
-It always starts on an even address, with a single null byte.
+Then the section containing identifier names follows.
+It always starts on an even address, with a single null byte, followed by the identifiers.
 Each identifier begins with a single byte, encoding the length of the identifier, followed by the characters of the identifier.
 
 Identifiers are indexed by their number in the sequence: the first identifier is accessed as identifier 0, the second one as identifier 1, and so on.
