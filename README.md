@@ -16,7 +16,7 @@ However, the author believes the code produces generally correct output.
 
 # Useful links
 
-* GW-BASIC, the predecessor to QuickBASIC, uses its own binary format, already documented in other places:
-** [Documentation of the binary format](http://www.chebucto.ns.ca/~af380/GW-BASIC-tokens.html)
-** [PC-BASIC documentation of the binary format](http://robhagemans.github.io/pcbasic/doc/2.0/#technical)
+GW-BASIC, the predecessor to QuickBASIC, uses its own binary format, already documented in other places:
+* [Documentation of the binary format](http://www.chebucto.ns.ca/~af380/GW-BASIC-tokens.html)
+* [PC-BASIC documentation of the binary format](http://robhagemans.github.io/pcbasic/doc/2.0/#technical)
 
