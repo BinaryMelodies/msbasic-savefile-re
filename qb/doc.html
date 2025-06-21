@@ -1,0 +1,4305 @@
+<!doctype html>
+<html>
+<head>
+<title>QuickBASIC binary encoding</title>
+<style>
+td {
+	font-family: monospace;
+	font-size: larger;
+
+	white-space: nowrap;
+}
+
+.description {
+	font-family: serif;
+	font-size: medium;
+}
+
+.parametrized {
+	color: red;
+	text-decoration: underline;
+}
+
+.undefined {
+	background: gray;
+}
+
+tt {
+	font-size: larger;
+}
+
+pre {
+	font-size: larger;
+}
+</style>
+</head>
+<body>
+
+<h1>Binary save file formats for QuickBASIC and Visual Basic for MS-DOS</h1>
+
+<p>Preamble: This guide is not intended to be a comprehensive description of the syntactical structure of the QuickBASIC programming language.
+While the information should be sufficient to convert the binary form to a textual form (and hopefully the other way around), no attempt has been made to exclude invalid constructs.
+Furthermore, any semantical interpretation of the code, required to write an interpreter for example, is beyond the scope of this document, and is only given when relevant to parsing the binary format.</p>
+
+<p>Disclaimer: All information present here was gathered without access to source code, disassembly or internal informationl, purely through studying the behavior of QuickBASIC and Visual Basic for DOS.
+As such, a lot of the information here is based on educated guesses and empirically verified assumptions.
+Anything on this page may change in light of new information, and no warranty is provided for its veracity.
+Relying on the information provided here is at your own risk.</p>
+
+<h2>Overview</h2>
+
+<p>The present document attempts to describe the binary save format of QuickBASIC and Visual Basic for MS-DOS.
+The following versions have been studied:</p>
+
+<ul>
+<li>[QB4.0] QuickBASIC 4.00</li>
+<li>[QB4.5] QuickBASIC 4.50</li>
+<li>[QB7.0] QuickBASIC Extended 7.0</li>
+<li>[QB7.1] QuickBASIC Extended 7.1</li>
+<li>[VBDOS] Visual Basic for MS-DOS, Version 1.00</li>
+</ul>
+
+<p>QuickBASIC offers 5 to 6 built in types, and these are regularly referenced throughout the binary format.
+For quick reference, they are listed here:</p>
+
+<table border='1'>
+<tr>
+<td></td>
+<td class='description'>QB4.0, QB4.5</td>
+<td class='description'>QB7.0, QB7.1</td>
+<td class='description'>VBDOS</td>
+</tr>
+<tr>
+<td>1</td>
+<td colspan='3'>INTEGER</td>
+</tr>
+<tr>
+<td>2</td>
+<td colspan='3'>LONG</td>
+</tr>
+<tr>
+<td>3</td>
+<td colspan='3'>SINGLE</td>
+</tr>
+<tr>
+<td>4</td>
+<td colspan='3'>DOUBLE</td>
+</tr>
+<tr>
+<td>5</td>
+<td>STRING</td>
+<td colspan='2'>CURRENCY</td>
+</tr>
+<tr>
+<td>6</td>
+<td class='undefined'></td>
+<td>STRING</td>
+<td class='undefined'></td>
+</tr>
+<tr>
+<td>7</td>
+<td colspan='2' class='undefined'></td>
+<td>STRING</td>
+</tr>
+</table>
+
+<h2>File layout</h2>
+
+<p>A QuickBASIC save file consists of 3 main parts: a header, a metadata table, and the procedure bodies and definitions.</p>
+
+<h3>The header</h3>
+
+<p>The first 3 bytes seem to determine what version of QuickBASIC or Visual Basic for DOS it was generated with.
+Here are the first 3 bytes as hexadecimal values and the length of the header:</p>
+
+<table border='1'>
+<tr>
+<td class='description'>Version</td>
+<td class='description'>First 3 bytes</td>
+<td class='description'>Size of header</td>
+</tr>
+<tr>
+<td class='description'>QB4.0</td>
+<td>FC 13 00</td>
+<td>14 (0x0E) bytes</td>
+</tr>
+<tr>
+<td class='description'>QB4.5</td>
+<td>FC 00 01</td>
+<td>28 (0x1C) bytes</td>
+</tr>
+<tr>
+<td class='description'>QB7.0</td>
+<td>FC 01 01</td>
+<td>29 (0x1D) bytes</td>
+</tr>
+<tr>
+<td class='description'>QB7.1</td>
+<td>FC 02 01</td>
+<td>29 (0x1D) bytes</td>
+</tr>
+<tr>
+<td class='description'>VBDOS</td>
+<td>FC 08 01</td>
+<td>at least 32 (0x20) bytes</td>
+</tr>
+</table>
+
+<p>For VBDOS forms, the header contains additional data, and the 16-bit little endian word at offset 0x14 stores how much additional bytes are contained in the header, beyond the default 32 bytes.</p>
+
+<p><b>All offsets within the file are encoded relative to the end of the header.</b></p>
+
+<p>The last 2 bytes of the header specify an offset, stored as a little endian 16-bit integer, from the end of the header to the start of the main procedure opcode stream.</p>
+
+<h3>The identifier table</h3>
+
+<p>Following the header is a series of metadata, including the identifier table.
+All identifiers used in the program have a corresponding entry in this region that they reference.
+An entry in the identifier table has the following format:</p>
+
+<pre>?? ?? &lt;flags:U8&gt; &lt;length:U8&gt; &lt;identifier&gt;</pre>
+
+<p>The exact meaning of the first two bytes is unknown, it appears to hold an offset, probably to the next identifier in a linked list.</p>
+
+<p>The third byte contains some metadata information.
+Only bit 1 (0x02) is currently known: if clear, the identifier is encoded as a sequence of ASCII characters.
+If set, the identifier is encoded as an unsigned 16-bit little endian word, representing a line number.
+QuickBASIC stores certain line numbers (apparently below 65530) in this little endian format, all other line numbers are stored in their ASCII representation.<p>
+
+<p>The fourth byte is the length of the identifier.
+For ASCII identifiers, this is the number of characters required to store them.
+For 16-bit labels stored as a 2-byte word, it is 2.</p>
+
+<h3>Procedure bodies and definitions</h3>
+
+<p>This part begins with a binary representation of the contents of the main module, then each <tt>SUB</tt> or <tt>FUNCTION</tt> definition follows.
+A <tt>SUB</tt> or <tt>FUNCTION</tt> procedure begins with a header.
+All three types of procedures continue with a sequence of 16-bit words describing the actual contents of the procedure, and terminated with a trailer part.</p>
+
+<p>The header of a <tt>SUB</tt> or <tt>FUNCTION</tt> has the following format:</p>
+
+<pre>?? &lt;length:U8&gt; &lt;name&gt; ?? ?? &lt;flags:U8&gt;</pre>
+
+<p>The second byte contains the length of the name of the procedure, followed by the actual characters.
+Two unknown bytes follow, as well as a <i>flags</i> byte.
+Only bit 7 is currently known, it represents a <tt>STATIC</tt> procedure.
+Note that the <tt>STATIC</tt> keyword does not appear in the opcode stream.</p>
+
+<p>All procedures are followed by an opcode stream representing the textual body of the procedure.
+The first two bytes encode the length of the opcode stream (not including the two bytes for the length), followed by a sequence of 16-bit little endian words.</p>
+
+<p>All procedures are terminated with 16 bytes.</p>
+
+<h3>Encoding of procedure bodies</h3>
+
+<p>The way BASIC source code is encoded follows an abstract syntax tree format.
+This is in opposition to other versions of Microsoft BASIC (such as GW-BASIC or Microsoft QuickBASIC for the Macintosh) that instead store the source code as a compactified token stream.</p>
+
+<p>The binary format is a sequence of 16-bit words that we will refer to as opcodes, interspersed with other data.
+The syntax tree can be understood to be constructed incrementally using these opcodes and data.
+Each opcode represents a step in the parsing process of the binary file.
+Some opcodes have parameters that follow them in the stream, such as the name of an identifier.
+Opcodes can also be preceded by parameters, similarly to how a stack machine would work.
+For example, an expression such as <tt>(1 + 2) * 3</tt> would be stored as the sequence of opcodes corresponding to <tt>1, 2, +, (), 3, *</tt>.
+The stack would then contain partial abstract syntax trees.</p>
+
+<p>The format of opcode words has not changed significantly between BASIC versions, though there are some incompatibilities.
+The biggest change occured between versions 4.0 and 4.5: all the opcodes have been renumbered.</p>
+
+<p>The most significant bits of an opcode can encode extra information.
+In QuickBASIC 4.0, only the 9 least significant bits determine the opcode type, whereas in QuickBASIC 4.5 and later, the 10 least significant bits are used.</p>
+
+<h2>The opcode stream format</h2>
+
+<p>Notation:</p>
+
+<dl>
+
+<dt><tt>ABCD</tt></dt>
+<dd>The opcode stream is a sequence of 16-bit little endian words.</dd>
+
+<dt><tt>????</tt></dt>
+<dd>A 16-bit word of unknown format.</dd>
+
+<dt><tt><span class='parametrized'>AB</span>CD</tt></dt>
+<dd>Some of the bits in a 16-bit word encode a parameter.<br>
+In QuickBASIC 4.0, the lower 9 bits, in QuickBASIC 4.5 and later, the lower 10 bits, store the opcode value.<br>
+The high 7 or 6 bits encode a special parameter, interpreted by the opcode.</dd>
+
+<dt><tt>&lt;a&gt;</tt> &mdash; <i>a</i></tt></dt>
+<dd>Syntactical subelements, encoded according to their specified opcodes.</dd>
+
+<dt><tt>&lt;a<sup>ABCD, 0123</sup>&gt;</tt> &mdash; <i>a</i></tt></dt>
+<dd>Specifying possible syntactical structures by allowed opcodes, for clarification.</dd>
+
+<dt><i>a<sup>structure</sup></i></tt></dt>
+<dd>Including the syntactical structure of an element, for clarification.</dd>
+
+<dt><tt>&lt;a:U16&gt;</tt></dt>
+<dd>Value encoded as an unsigned 16-bit little endian word.</dd>
+
+<dt><tt>&lt;a:U32&gt;</tt></dt>
+<dd>Value encoded as an unsigned 32-bit little endian word.</dd>
+
+<dt><tt>&lt;a:U64&gt;</tt></dt>
+<dd>Value encoded as an unsigned 64-bit little endian word.</dd>
+
+<dt><tt>&lt;a:F32&gt;</tt></dt>
+<dd>Value encoded as an unsigned 32-bit IEEE floating point number, in little endian format.</dd>
+
+<dt><tt>&lt;a:F64&gt;</tt></dt>
+<dd>Value encoded as an unsigned 64-bit IEEE floating point number, in little endian format.</dd>
+
+<dt><tt>&lt;a:STR&gt;</tt></dt>
+<dd>String value encoded as an unsigned 16-bit little endian word containing the length of the string, followed by the actual characters.<br>
+The string is padded to a 16-bit word boundary (if the stream starts at an odd address, the padding will also reach an odd address).</dd>
+
+<dt><tt>&lt;a:IDN&gt;</tt></dt>
+<dd>A 16-bit word identifies an offset into the identifier table, from the end of the header.</dd>
+
+<dt><tt>{ contents }<sup>N</sup></tt> &mdash; contents<sub>1</sub>, &hellip;, contents<sub><i>N</i></sub></dt>
+<dd>A syntactic element repeated a specific amount of times, where <i>N</i> can be determined from the opcode stream.</dd>
+
+<dt><tt>N<sup>*</sup></tt></dt>
+<dd>For argument lists with optional parameters, it is the sum of the number of argument positions and the number of arguments actually present. If all positions are present, it is equal to 2 * <i>N</i>.</dd>
+
+<dt><tt>{ contents }</tt> &mdash; contents<sub>1</sub>, &hellip;</dt>
+<dd>A syntactic element repeated several times, the amount of which is determined by the first tokens that do not belong in the contents.</dd>
+
+<dt><tt>(contents IF token)<br>(contents IF token ELSE alternatives)</tt><br>&mdash; (token | alternatives)</dt>
+<dd>Alternative syntactical elements, the encoding depending on the presence of the specific token.</dd>
+
+<dt><tt>(contents OR opcode)<br>[contents]<br>[opcode IF token]</tt> &mdash; [contents]</dt>
+<dd>Optional syntactical element, replaced by other opcodes if absent.</dd>
+
+<dt>(E) <i>expression</i></dt>
+<dd>An element appearing in the context of an arbitrary expression (as opposed to a statement).</dd>
+
+</dl>
+
+<table border='1'>
+
+<tr>
+<td class='description'>QB4.0</td>
+<td class='description'>QB4.5</td>
+<td class='description'>QB7.0</td>
+<td class='description'>QB7.1</td>
+<td class='description'>VBDOS</td>
+<td class='description'>Notes</td>
+</tr>
+
+<tr>
+<td colspan='5'><b><span class='parametrized'>00</span>00</b></td>
+<td class='description'>Newline, parameter encodes the number of spaces before the first non-space character</td>
+</tr>
+
+<tr>
+<td colspan='5'><b>0004</b> ???? &lt;label:IDN&gt;</td>
+<td class='description'>Labelled line</td>
+</tr>
+
+<tr>
+<td colspan='5'><b>0005</b> ???? &lt;label:IDN&gt; &lt;spaces:U16&gt;</td>
+<td class='description'>Labelled line, spaces between label and character</td>
+</tr>
+
+<tr>
+<td colspan='5'><b>0006</b></td>
+<td class='description'>Semicolon (<tt>:</tt>) separating statements in a line
+<br>First non-space character after colon starts after an additional space</td>
+</tr>
+
+<tr>
+<td colspan='5'><b>0007</b> &lt;column:U16&gt;</td>
+<td class='description'>Semicolon (<tt>:</tt>) separating statements in a line
+<br>First non-space character after colon starts in <i>column</i> (0 based)</td>
+</tr>
+
+<tr>
+<td colspan='5'><b>0009 0008</b></td>
+<td class='description'>Terminates opcode stream of module/SUB/FUNCTION body</td>
+</tr>
+
+<tr>
+<td colspan='5'><b>000A</b> &lt;line:STR&gt;</td>
+<td class='description'>Error in line, could not be parsed, first two bytes encode metadata(?)</span></td>
+</tr>
+
+<tr>
+<td><b>000B</b> &lt;name:IDN&gt;
+<br><b>000C</b> &lt;name:IDN&gt;
+<br><b>000D</b> &lt;name:IDN&gt;
+<br><b>000E</b> &lt;name:IDN&gt;
+<br><b>000F</b> &lt;name:IDN&gt;
+<br><b>0010</b> &lt;name:IDN&gt;
+<hr><i>name?</i></td>
+<td colspan='4'><b><span class='parametrized'>00</span>0B</b> &lt;name:IDN&gt;
+<hr><i>name</i><span class='parametrized'>?</span></td>
+<td class='description'>Variable<br>In QuickBASIC 4.5 and later, parameter encodes type suffix</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0011</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; <b>0012</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; <b>0013</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; <b>0014</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; <b>0015</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; <b>0016</b> &lt;name:IDN&gt;
+<hr><i>name?</i> = <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b><span class='parametrized'>00</span>0C</b> &lt;name:IDN&gt;
+<hr><i>name</i><span class='parametrized'>?</span> = <i>a</i></td>
+<td class='description'>Variable assignment<br>In QuickBASIC 4.5 and later, parameter encodes type suffix</td>
+</tr>
+
+<tr>
+<td colspan='5'>1 = % (INTEGER)</td>
+<td class='description' rowspan='7'>The type prefixes seen on the left can be encoded</td>
+</tr>
+
+<tr>
+<td colspan='5'>2 = &amp; (LONG)</td>
+</tr>
+
+<tr>
+<td colspan='5'>3 = ! (SINGLE)</td>
+</tr>
+
+<tr>
+<td colspan='5'>4 = # (DOUBLE)</td>
+</tr>
+
+<tr>
+<td colspan='2'>5 = $ (STRING)</td>
+<td colspan='3'>5 = @ (CURRENCY)</td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='2'>6 = $ (STRING)</td>
+<td class='undefined'>6 = # (DOUBLE)</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>7 = $ (STRING)</td>
+</tr>
+
+<tr>
+<td>[&lt;type<sup>003B, 003C</sup>&gt;] <b>0017</b> &lt;name:IDN&gt;
+<br>[&lt;type<sup>003B, 003C</sup>&gt;] <b>0018</b> &lt;name:IDN&gt;
+<br>[&lt;type<sup>003B, 003C</sup>&gt;] <b>0019</b> &lt;name:IDN&gt;
+<br>[&lt;type<sup>003B, 003C</sup>&gt;] <b>001A</b> &lt;name:IDN&gt;
+<br>[&lt;type<sup>003B, 003C</sup>&gt;] <b>001B</b> &lt;name:IDN&gt;
+<br>[&lt;type<sup>003B, 003C</sup>&gt;] <b>001C</b> &lt;name:IDN&gt;
+<hr><i>name?</i> AS <i>type</i></td>
+<td colspan='4'>[&lt;type<sup>0015, 0016, 017C</sup>&gt;] <b><span class='parametrized'>00</span>0D</b> &lt;name:IDN&gt;
+<hr><i>name</i><span class='parametrized'>?</span> AS <i>type</i></td>
+<td class='description'>Appears in a <tt>COMMON</tt>, <tt>DIM</tt>, <tt>SHARED</tt>, <tt>STATIC</tt> statement</td>
+</tr>
+
+<tr>
+<td>{&lt;a&gt;}<sup>N</sup> <b>001D</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> <b>001E</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> <b>001F</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> <b>0020</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> <b>0021</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> <b>0022</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<hr><i>name?</i>(<i>a</i><sub>1</sub>, &hellip;, <i>a</i><sub><i>N</i></sub>)</td>
+<td colspan='4'>{&lt;a&gt;}<sup>N</sup> <b><span class='parametrized'>00</span>0E</b> (&lt;N:U16&gt; OR 8000) &lt;name:IDN&gt;
+<hr><i>name</i><span class='parametrized'>?</span>[(<i>a</i><sub>1</sub>, &hellip;, <i>a</i><sub><i>N</i></sub>)]
+<hr>{(&lt;a&gt; OR 0018) &lt;b&gt;}<sup>N</sup> <b><span class='parametrized'>00</span>0E</b> &lt;2 * N:U16&gt; &lt;name:IDN&gt;
+<hr><i>name</i>([<i>a</i><sub>1</sub> TO] <i>b</i><sub>1</sub>, &hellip;, [<i>a</i><sub><i>N</i></sub> TO] <i>b</i><sub><i>N</i></sub>) AS <i>type</i></td>
+<td class='description'>Array or function call.
+<br>In QuickBASIC 4.5 and later, parameter encodes type suffix.
+<br>In QuickBASIC 4.5 and later, the first form appears in the <tt>ERASE</tt>, <tt>GET</tt>, <tt>PALETTE USING</tt>, <tt>PUT</tt> statements and the <tt>LBOUND</tt>, <tt>UBOUND</tt> functions.
+<br>In QuickBASIC 4.5 and later, the second form is used for <tt>REDIM</tt> statements.
+<br>Note that this QuickBASIC 4.5 opcode can correspond to either <tt>001D-0022</tt> or <tt>0029-002E</tt> in QuickBASIC 4.0.</td>
+</tr>
+
+<tr>
+<td>{&lt;a&gt;}<sup>N</sup> &lt;b&gt; <b>0023</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> &lt;b&gt; <b>0024</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> &lt;b&gt; <b>0025</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> &lt;b&gt; <b>0026</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> &lt;b&gt; <b>0027</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> &lt;b&gt; <b>0028</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<hr><i>name?</i>(<i>a</i><sub>1</sub>, &hellip;, <i>a</i><sub><i>N</i></sub>) = <i>b</i></td>
+<td colspan='4'>{&lt;a&gt;}<sup>N</sup> &lt;b&gt; <b><span class='parametrized'>00</span>0F</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<hr><i>name</i><span class='parametrized'>?</span>(<i>a</i><sub>1</sub>, &hellip;, <i>a</i><sub><i>N</i></sub>) = <i>b</i></td>
+<td class='description'>Array assignment<br>In QuickBASIC 4.5 and later, parameter encodes type suffix</td>
+</tr>
+
+<tr>
+<td>{(&lt;a&gt; OR 003E) &lt;b&gt;}<sup>N</sup> [&lt;type<sup>003B, 003C</sup>&gt;] <b>0029</b> &lt;2 * N:U16&gt; &lt;name:IDN&gt;
+<br>{(&lt;a&gt; OR 003E) &lt;b&gt;}<sup>N</sup> [&lt;type<sup>003B, 003C</sup>&gt;] <b>002A</b> &lt;2 * N:U16&gt; &lt;name:IDN&gt;
+<br>{(&lt;a&gt; OR 003E) &lt;b&gt;}<sup>N</sup> [&lt;type<sup>003B, 003C</sup>&gt;] <b>002B</b> &lt;2 * N:U16&gt; &lt;name:IDN&gt;
+<br>{(&lt;a&gt; OR 003E) &lt;b&gt;}<sup>N</sup> [&lt;type<sup>003B, 003C</sup>&gt;] <b>002C</b> &lt;2 * N:U16&gt; &lt;name:IDN&gt;
+<br>{(&lt;a&gt; OR 003E) &lt;b&gt;}<sup>N</sup> [&lt;type<sup>003B, 003C</sup>&gt;] <b>002D</b> &lt;2 * N:U16&gt; &lt;name:IDN&gt;
+<br>{(&lt;a&gt; OR 003E) &lt;b&gt;}<sup>N</sup> [&lt;type<sup>003B, 003C</sup>&gt;] <b>002E</b> &lt;2 * N:U16&gt; &lt;name:IDN&gt;
+<hr><i>name?</i>([<i>a</i><sub>1</sub> TO] <i>b</i><sub>1</sub>, &hellip;, [<i>a</i><sub><i>N</i></sub> TO] <i>b</i><sub><i>N</i></sub>) AS <i>type</i>
+<hr>{&lt;a&gt;}<sup>N</sup> <b>0029</b> (&lt;N:U16&gt; OR 8000) &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> <b>002A</b> (&lt;N:U16&gt; OR 8000) &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> <b>002B</b> (&lt;N:U16&gt; OR 8000) &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> <b>002C</b> (&lt;N:U16&gt; OR 8000) &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> <b>002D</b> (&lt;N:U16&gt; OR 8000) &lt;name:IDN&gt;
+<br>{&lt;a&gt;}<sup>N</sup> <b>002E</b> (&lt;N:U16&gt; OR 8000) &lt;name:IDN&gt;
+<hr><i>name?</i>[(<i>a</i><sub>1</sub>, &hellip;, <i>a</i><sub><i>N</i></sub>)]</td>
+<td colspan='4'>{(&lt;a&gt; OR 0018) &lt;b&gt;}<sup>N</sup> [&lt;type<sup>0015, 0016, 017C</sup>&gt;] <b><span class='parametrized'>00</span>10</b> &lt;2 * N:U16&gt; &lt;name:IDN&gt;
+<hr><i>name</i><span class='parametrized'>?</span>([<i>a</i><sub>1</sub> TO] <i>b</i><sub>1</sub>, &hellip;, [<i>a</i><sub><i>N</i></sub> TO] <i>b</i><sub><i>N</i></sub>) AS <i>type</i></td>
+<td class='description'>Appears in <tt>COMMON</tt>, <tt>DIM</tt>, <tt>SHARED</tt>, <tt>STATIC</tt> statements, in the first form for QuickBASIC 4.0.
+<br>In QuickBASIC 4.0, the first form appears in <tt>REDIM</tt> statements.
+<br>In QuickBASIC 4.0, the second form appear in <tt>ERASE</tt>, <tt>GET</tt>, <tt>PALETTE USING</tt>, <tt>PUT</tt> statements and the <tt>LBOUND</tt>, <tt>UBOUND</tt> functions.
+<br>Note that for the second form, the type specification is missing, and the number of parameters is different.
+<br>Note that this QuickBASIC 4.0 opcode can correspond to either <tt>000E</tt> or <tt>0010</tt> in QuickBASIC 4.5.</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>002F</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; <b>0030</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; <b>0031</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; <b>0032</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; <b>0033</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; <b>0034</b> &lt;name:IDN&gt;
+<hr><i>a</i>.<i>name?</i></td>
+<td colspan='4'>&lt;a&gt; <b><span class='parametrized'>00</span>11</b> &lt;name:IDN&gt;
+<hr><i>a</i>.<i>name</i><span class='parametrized'>?</span></td>
+<td class='description'>Field selection<br>In QuickBASIC 4.5 and later, parameter encodes type suffix</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0035</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; &lt;b&gt; <b>0036</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; &lt;b&gt; <b>0037</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; &lt;b&gt; <b>0038</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; &lt;b&gt; <b>0039</b> &lt;name:IDN&gt;
+<br>&lt;a&gt; &lt;b&gt; <b>003A</b> &lt;name:IDN&gt;
+<hr><i>b</i>.<i>name?</i> = <i>a</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b><span class='parametrized'>00</span>12</b> &lt;name:IDN&gt;
+<hr><i>b</i>.<i>name</i><span class='parametrized'>?</span> = <i>a</i></td>
+<td class='description'>Field assignment<br>In QuickBASIC 4.5 and later, parameter encodes type suffix</td>
+</tr>
+
+<tr>
+<td class='undefined'></td>
+<td colspan='4'>{&lt;a&gt;}<sup>N</sup> &lt;b&gt; <b><span class='parametrized'>00</span>13</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<hr><i>b</i>.<i>name</i><span class='parametrized'>?</span>(<i>a</i><sub>1</sub>, &hellip;, <i>a</i><sub><i>N</i></sub>)</td>
+<td class='description'>Array field selection<br>Parameter encodes type suffix</td>
+</tr>
+
+<tr>
+<td class='undefined'></td>
+<td colspan='4'>&lt;a&gt; {&lt;b&gt;}<sup>N</sup> &lt;c&gt; <b><span class='parametrized'>00</span>14</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<hr><i>c</i>.<i>name</i><span class='parametrized'>?</span>(<i>b</i><sub>1</sub>, &hellip;, <i>b</i><sub><i>N</i></sub>) = <i>a</i></td>
+<td class='description'>Array field assignment<br>Parameter encodes type suffix</td>
+</tr>
+
+<tr>
+<td><b>003B</b> &lt;name:IDN&gt; &lt;column:U16&gt;</td>
+<td colspan='4'><b>0015</b> &lt;name:IDN&gt; &lt;column:U16&gt;</td>
+<td class='description'>User defined type, the <tt>AS</tt> keyword appearing in <i>column</i> (0 based)</td>
+</tr>
+
+<tr>
+<td><b>003C</b> &lt;type:U16&gt; &lt;column:U16&gt;</td>
+<td colspan='4'><b>0016</b> &lt;type:U16&gt; &lt;column:U16&gt;</td>
+<td rowspan='10' class='description'>Built-in type, the <tt>AS</tt> keyword appearing in <i>column</i> (0 based)</td>
+</tr>
+
+<tr>
+<td colspan='5'>0000<br>ANY</td>
+</tr>
+
+<tr>
+<td colspan='5'>0001<br>INTEGER</td>
+</tr>
+
+<tr>
+<td colspan='5'>0002<br>LONG</td>
+</tr>
+
+<tr>
+<td colspan='5'>0003<br>SINGLE</td>
+</tr>
+
+<tr>
+<td colspan='5'>0004<br>DOUBLE</td>
+</tr>
+
+<tr>
+<td colspan='2'>0005<br>STRING</td>
+<td colspan='3'>0005<br>CURRENCY</td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='2'>0006<br>STRING</td>
+<td class='undefined'>DOUBLE</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>0006<br>STRING</td>
+</tr>
+
+<tr>
+<td><span class='parametrized'>8000</span><br>STRING * <i><span class='parametrized'>n</span></i> <span class='description'>(the lower 15 bits store the string width)</span></td>
+<td colspan='4' class='undefined'></td>
+</tr>
+
+<tr>
+<td><b>003D</b></td>
+<td colspan='4'><b>0017</b></td>
+<td class='description'>Inserted at the end of a line that references variables containing a full stop (<tt>.</tt>) symbol</td>
+</tr>
+
+<tr>
+<td><b>003E</b></td>
+<td colspan='4'><b>0018</b></td>
+<td class='description'>Signifies default lower bound in array bound declaration</td>
+</tr>
+
+<tr>
+<td><b>003F</b> &lt;name:IDN&gt; &lt;type<sup>003B, 003C</sup>&gt; ????
+<hr><i>name</i> AS <i>type</i></td>
+<td colspan='4'><b>0019</b> &lt;name:IDN&gt; &lt;type<sup>0015, 0016, 017C</sup>&gt; ????
+<hr><i>name</i> AS <i>type</i></td>
+<td class='description'>Appears within <tt>TYPE</tt> declarations</td>
+</tr>
+
+<tr>
+<td><b>0040</b>
+<hr>SHARED</td>
+<td colspan='4'><b>001A</b>
+<hr>SHARED</td>
+<td class='description'>Appears before a <tt>COMMON</tt>, <tt>DIM</tt>, <tt>REDIM</tt> statement</td>
+</tr>
+
+<tr>
+<td><b>0041</b> ???? &lt;data:U32&gt;
+<hr>DEF<i>type</i> <i>ranges</i></td>
+<td colspan='4'><b>001B</b> ???? &lt;data:U32&gt;
+<hr>DEF<i>type</i> <i>ranges</i></td>
+<td class='description'><i>type</i> is encoded in bits 0 to 5
+<br><i>ranges</i> is encoded as a bitset, with A being included if bit 31 is set, and Z being included if bit 6 is set</td>
+</tr>
+
+<tr>
+<td>&lt;decl<sup>0017-001C</sup>&gt; <b>0042</b>
+<hr>DIM <i>decl</i></td>
+<td colspan='4' class='undefined'></td>
+<td class='description'>A single non-array item in a <tt>DIM</tt> declaration.
+<br>In QuickBASIC 4.0, <tt>DIM</tt> statements are a sequence of <tt>0042</tt> and <tt>0044</tt> items, with no opcode starting the statement.
+<br>QuickBASIC 4.5 and later require a <tt>017D</tt> opcode to appear before the declarations instead.</td>
+</tr>
+
+<tr>
+<td>&lt;decl<sup>0029-002E</sup>&gt; <b>0044</b>
+<hr>DIM <i>decl</i></td>
+<td colspan='4' class='undefined'></td>
+<td class='description'>A single array item in a <tt>DIM</tt> declaration.
+<br>In QuickBASIC 4.0, <tt>DIM</tt> statements are a sequence of <tt>0042</tt> and <tt>0044</tt> items, with no opcode starting the statement.
+<br>QuickBASIC 4.5 and later require a <tt>017D</tt> opcode to appear before the declarations instead.</td>
+</tr>
+
+<tr>
+<td>&lt;decl<sup>0029-002E</sup>&gt; <b>0045</b>
+<hr>REDIM <i>decl</i></td>
+<td colspan='4'>&lt;decl<sup>000E</sup>&gt; <b>001C</b>
+<hr>REDIM <i>decl</i></td>
+<td class='description'>A single item in a <tt>REDIM</tt> declaration
+<br><tt>REDIM</tt> statements are a sequence of <tt>0045/001C</tt> items, with no opcode starting the statement.
+<br>If the <tt>SHARED</tt> keyword is used, it must appear once for the statement before all the declarations.
+<br>Note: QuickBASIC 4.0 uses a different encoding for the arrays than later versions</td>
+</tr>
+
+<tr>
+<td><b>0046</b>
+<hr>END TYPE</td>
+<td colspan='4'><b>001D</b>
+<hr>END TYPE</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0047</b> ???? {&lt;decl<sup>0017-001C, 0029-002E</sup>&gt;}
+<hr>SHARED <i>decl</i><sub>1</sub>, &hellip;</td>
+<td colspan='4'><b>001E</b> ???? {&lt;decl<sup>000D, 0010</sup>&gt;}
+<hr>SHARED <i>decl</i><sub>1</sub>, &hellip;</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0048</b> ???? {&lt;decl<sup>0017-001C, 0029-002E</sup>&gt;}
+<hr>STATIC <i>decl</i><sub>1</sub>, &hellip;</td>
+<td colspan='4'><b>001F</b> ???? {&lt;decl<sup>000D, 0010</sup>&gt;}
+<hr>STATIC <i>decl</i><sub>1</sub>, &hellip;</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0049</b> ???? &lt;name:IDN&gt;
+<hr>TYPE <i>name</i></td>
+<td colspan='4'><b>0020</b> ???? &lt;name:IDN&gt;
+<hr>TYPE <i>name</i></td>
+<td class='description'>A series of <tt>003F</tt>/<tt>0019</tt> and since QuickBASIC 7.0, <tt>017E</tt>
+<br>Terminated by <tt>0046</tt>/<tt>001D</tt></td>
+</tr>
+
+<tr>
+<td>&lt;REM<sup>00C0, 010C</sup>&gt; <b>004A</b> ????
+<hr><i>REM</i> $STATIC</td>
+<td colspan='4'>&lt;REM<sup>0097, 00E3</sup>&gt; <b>0021</b> ????
+<hr><i>REM</i> $STATIC</td>
+<td class='description'>Appears after a comment opcode (<tt>REM</tt> or <tt>'</tt>)</td>
+</tr>
+
+<tr>
+<td>&lt;REM<sup>00C0, 010C</sup>&gt; <b>004B</b> ????
+<hr><i>REM</i> $DYNAMIC</td>
+<td colspan='4'>&lt;REM<sup>0097, 00E3</sup>&gt; <b>0022</b> ????
+<hr><i>REM</i> $DYNAMIC</td>
+<td class='description'>Appears after a comment opcode (<tt>REM</tt> or <tt>'</tt>)</td>
+</tr>
+
+<tr>
+<td><b>004C</b> {&lt;assign<sup>0011</sup>&gt;}
+<hr>CONST <i>assign</i><sub>1</sub>, &hellip;</td>
+<td colspan='4'><b>0023</b> {&lt;assign<sup>000C</sup>&gt;}
+<hr>CONST <i>assign</i><sub>1</sub>, &hellip;</td>
+<td class='description'>Constant declarations are stored as assignments</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>004E</b>
+<hr>BYVAL <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0025</b>
+<hr>BYVAL <i>a</i></td>
+<td class='description'>Appears within a <tt>DECLARE</tt>, <tt>FUNCTION</tt>, <tt>SUB</tt> declaration or <tt>CALL</tt>, <tt>CALLS</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>004F</b> ???? ????</td>
+<td colspan='4'>&lt;a&gt; <b>0026</b> ???? ????</td>
+<td class='description'>Provides the body of a single line <tt>DEF FN</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0050</b>
+<hr>COM(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0027</b>
+<hr>COM(<i>a</i>)</td>
+<td class='description'>May appear in <tt>ON GOSUB</tt> statements or as part of an <tt>OFF/ON/STOP</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>0050, 0052, 0056, 0058, 0059, 005A, 005C</sup>&gt; <b>0051</b> &lt;label:IDN&gt;
+<hr>ON <i>a</i> GOSUB <i>label</i></td>
+<td colspan='4'>&lt;a<sup>0027, 0029, 002D, 002F, 0030, 0031, 0033, 017A</sup>&gt; <b>0028</b> &lt;label:IDN&gt;
+<hr>ON <i>a</i> GOSUB <i>label</i></td>
+<td class='description'>This instruction is only used for the <tt>COM</tt>/<tt>KEY</tt>/<tt>PEN</tt>/<tt>PLAY</tt>/<tt>SIGNAL</tt>/<tt>STRIG</tt>/<tt>TIMER</tt>/<tt>UEVENT</tt> conditions</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0052</b>
+<hr>KEY(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0029</b>
+<hr>KEY(<i>a</i>)</td>
+<td class='description'>May appear in <tt>ON GOSUB</tt> statements or as part of an <tt>OFF/ON/STOP</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>0050, 0052, 0056, 0057, 0059, 005A, 005B</sup>&gt; <b>0053</b>
+<hr><i>a</i> OFF</i></td>
+<td colspan='4'>&lt;a<sup>0027, 0029, 002D, 002E, 0030, 0031, 0032, 017A</sup>&gt; <b>002A</b>
+<hr><i>a</i> OFF</i></td>
+<td class='description'>Appears within a <tt>COM</tt>/<tt>KEY</tt>/<tt>PEN</tt>/<tt>PLAY</tt>/<tt>SIGNAL</tt>/<tt>STRIG</tt>/<tt>TIMER</tt>/<tt>UEVENT</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>0050, 0052, 0056, 0057, 0059, 005A, 005B</sup>&gt; <b>0054</b>
+<hr><i>a</i> ON</i></td>
+<td colspan='4'>&lt;a<sup>0027, 0029, 002D, 002E, 0030, 0031, 0032, 017A</sup>&gt; <b>002B</b>
+<hr><i>a</i> ON</i></td>
+<td class='description'>Appears within a <tt>COM</tt>/<tt>KEY</tt>/<tt>PEN</tt>/<tt>PLAY</tt>/<tt>SIGNAL</tt>/<tt>STRIG</tt>/<tt>TIMER</tt>/<tt>UEVENT</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>0050, 0052, 0056, 0057, 0059, 005A, 005B</sup>&gt; <b>0055</b>
+<hr><i>a</i> STOP</i></td>
+<td colspan='4'>&lt;a<sup>0027, 0029, 002D, 002E, 0030, 0031, 0032, 017A</sup>&gt; <b>002C</b>
+<hr><i>a</i> STOP</i></td>
+<td class='description'>Appears within a <tt>COM</tt>/<tt>KEY</tt>/<tt>PEN</tt>/<tt>PLAY</tt>/<tt>SIGNAL</tt>/<tt>STRIG</tt>/<tt>TIMER</tt>/<tt>UEVENT</tt> statement</td>
+</tr>
+
+<tr>
+<td><b>0056</b>
+<hr>PEN</td>
+<td colspan='4'><b>002D</b>
+<hr>PEN</td>
+<td class='description'>May appear in <tt>ON GOSUB</tt> statements or as part of an <tt>OFF/ON/STOP</tt> statement</td>
+</tr>
+
+<tr>
+<td><b>0057</b>
+<hr>PLAY</td>
+<td colspan='4'><b>002E</b>
+<hr>PLAY</td>
+<td class='description'>May appear as part of an <tt>OFF/ON/STOP</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0058</b>
+<hr>PLAY(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>002F</b>
+<hr>PLAY(<i>a</i>)</td>
+<td class='description'>May appear in <tt>ON GOSUB</tt> statements</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0059</b>
+<hr>SIGNAL(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0030</b>
+<hr>SIGNAL(<i>a</i>)</td>
+<td class='description'>May appear in <tt>ON GOSUB</tt> statements or as part of an <tt>OFF/ON/STOP</tt> statement
+<br>Note that QuickBASIC 4.0/4.5 recognizes this syntax, but does not support its execution</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>005A</b>
+<hr>STRIG(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0031</b>
+<hr>STRIG(<i>a</i>)</td>
+<td class='description'>May appear in <tt>ON GOSUB</tt> statements or as part of an <tt>OFF/ON/STOP</tt> statement</td>
+</tr>
+
+<tr>
+<td><b>005B</b>
+<hr>TIMER</td>
+<td colspan='4'><b>0032</b>
+<hr>TIMER</td>
+<td class='description'>May appear as part of an <tt>OFF/ON/STOP</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>005C</b>
+<hr>TIMER(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0033</b>
+<hr>TIMER(<i>a</i>)</td>
+<td class='description'>May appear in <tt>ON GOSUB</tt> statements</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>005F</b>
+<hr>SEG <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0036</b>
+<hr>SEG <i>a</i></td>
+<td class='description'>Appears within a <tt>CALLS</tt> statement</td>
+</tr>
+
+<tr>
+<td>{&lt;arg&gt;}<sup>N</sup> <b>0060</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<hr>CALL <i>name</i>(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)</td>
+<td colspan='4'>{&lt;arg&gt;}<sup>N</sup> <b>0037</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<hr>CALL <i>name</i>(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>{&lt;arg&gt;}<sup>N</sup> <b>0061</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<hr><i>name</i> <i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub></td>
+<td colspan='4'>{&lt;arg&gt;}<sup>N</sup> <b>0038</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<hr><i>name</i> <i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub></td>
+<td class='description'>Subroutine call</td>
+</tr>
+
+<tr>
+<td>{&lt;arg&gt;}<sup>N</sup> <b>0062</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<hr>CALLS <i>name</i>(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)</td>
+<td colspan='4'>{&lt;arg&gt;}<sup>N</sup> <b>0039</b> &lt;N:U16&gt; &lt;name:IDN&gt;
+<hr>CALLS <i>name</i>(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0063</b>
+<hr>CASE ELSE</td>
+<td colspan='4'><b>003A</b>
+<hr>CASE ELSE</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0064</b>
+<hr>CASE <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>003B</b>
+<hr>CASE <i>a</i></td>
+<td rowspan='8' class='description'>Multiple opcodes may appear within a single <tt>CASE</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0065</b>
+<hr>CASE <i>a</i> TO <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>003C</b>
+<hr>CASE <i>a</i> TO <i>b</i></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0066</b>
+<hr>CASE IS = <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>003D</b>
+<hr>CASE IS = <i>a</i></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0067</b>
+<hr>CASE IS &lt; <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>003E</b>
+<hr>CASE IS &lt; <i>a</i></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0068</b>
+<hr>CASE IS &gt; <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>003F</b>
+<hr>CASE IS &gt; <i>a</i></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0069</b>
+<hr>CASE IS &lt;= <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0040</b>
+<hr>CASE IS &lt;= <i>a</i></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>006A</b>
+<hr>CASE IS &gt;= <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0041</b>
+<hr>CASE IS &gt;= <i>a</i></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>006B</b>
+<hr>CASE IS &lt;&gt; <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0042</b>
+<hr>CASE IS &lt;&gt; <i>a</i></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>006C</b>
+<hr>CHAIN <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0043</b>
+<hr>CHAIN <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>006D</b> ???? &lt;name:IDN&gt; &lt;flags:U16&gt; (&lt;N:U16&gt; OR FFFF) {&lt;arg&gt;}<sup>N</sup> [&lt;alias&gt;]
+<hr>DECLARE (SUB|FUNCTION) <i>name</i> [CDECL] [ALIAS "<i>alias</i>"][(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)]</td>
+<td colspan='4'><b>0044</b> ???? &lt;name:IDN&gt; &lt;flags:U16&gt; (&lt;N:U16&gt; OR FFFF) {&lt;arg&gt;}<sup>N</sup> [&lt;alias&gt;]
+<hr>DECLARE (SUB|FUNCTION) <i>name</i> [CDECL] [ALIAS "<i>alias</i>"][(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)]</td>
+<td rowspan='2' class='description'>The <i>flags</i> parameter determines the type of the declaration, and whether an alias is present or not.
+<br>When the bit <tt>0100</tt> is set, it is a <tt>SUB</tt>.
+<br>When the bit <tt>0200</tt> is set, it is a <tt>FUNCTION</tt>.
+<br>When the bit <tt>0080</tt> is set for a <tt>FUNCTION</tt>, it encodes return type information using a type suffix.
+<br>In this case, the type is stored in the lower bits of the flags value.
+<br>Bit <tt>8000</tt> is set if the function is <tt>CDECL</tt>
+<br>Bits 10 to 14 determine the length of the alias string, or 0 if it is not present.
+<hr>Arguments are encoded as seen on the left.
+<br><i>type</i> encodes the type.
+<br>Either as the number of the built-in type (see list of type suffixes), or an offset to the custom variable type name.
+<br>If bit <tt>0400</tt> of <i>mode</i> is set, the argument is an array (number of dimensions and size are not specified).</td>
+</tr>
+
+<tr>
+<td colspan='3'>&lt;name:IDN&gt; &lt;mode:U16&gt; &lt;type:U16&gt;</td>
+<td colspan='2'>&lt;name:IDN&gt; &lt;mode:U16&gt; &lt;type:U16&gt; ????</td>
+</tr>
+
+<tr>
+<td><b>006E</b> ???? ???? &lt;FNname:IDN&gt; &lt;flags:U16&gt; &lt;N:U16&gt; {&lt;arg&gt;}<sup>N</sup>
+<br>[&lt;exp&gt; 004F ???? ????]
+<hr>DEF FN<i>name</i>[(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)] [= <i>exp</i>]</td>
+<td colspan='4'><b>0045</b> ???? ???? &lt;FNname:IDN&gt; &lt;flags:U16&gt; &lt;N:U16&gt; {&lt;arg&gt;}<sup>N</sup>
+<br>[&lt;exp&gt; 0026 ???? ????]
+<hr>DEF FN<i>name</i>[(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)] [= <i>exp</i>]</td>
+<td rowspan='2' class='description'>Single line or head of multiline <tt>DEF FN</tt> declaration
+<br>Note that the <tt>FN</tt> prefix is stored as part of the name
+<hr><i>flags</i> always has the bits <tt>0300</tt> on
+<br>If bit 0080 is on, the lower 4 bits encode the type suffix (see list of type suffixes).
+<hr>Each argument is encoded as seen on the left
+<br>The lower bits of <i>mode</i> encode the type.
+<br>Either as the number of the built-in type (see list of type suffixes), or an offset to the custom variable type name.
+<br>If bit <tt>2000</tt> is set, the type is represented with an <tt>AS</tt> keyword
+<br>If bit <tt>0200</tt> is set, the type is represented with a type suffix symbol
+<br>Otherwise, the type is implicit, and should be <tt>0003</tt> (<tt>SINGLE</tt>)</td>
+</tr>
+
+<tr>
+<td colspan='3'>&lt;name:IDN&gt; &lt;mode:U16&gt; &lt;type:U16&gt;</td>
+<td colspan='2'>&lt;name:IDN&gt; &lt;mode:U16&gt; &lt;type:U16&gt; ????</td>
+</tr>
+
+<tr>
+<td><b>006F</b>
+<hr>DO</td>
+<td colspan='4'><b>0046</b>
+<hr>DO</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0070</b> ????
+<hr>DO UNTIL <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0047</b> ????
+<hr>DO UNTIL <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0071</b> ????
+<hr>DO WHILE <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0048</b> ????
+<hr>DO WHILE <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0072</b> ????
+<hr>ELSE
+<hr><b>0072</b> ???? &lt;a&gt;
+<hr>ELSE <i>a</i></td>
+<td colspan='4'><b>0049</b> ????
+<hr>ELSE
+<hr><b>0049</b> ???? &lt;a&gt;
+<hr>ELSE <i>a</i></td>
+<td class='description'>May appear as part of a single line <tt>IF</tt> statement, or as a single line <tt>ELSE</tt> statement in an <tt>IF</tt> block</td>
+</tr>
+
+<tr>
+<td><b>0075</b> ???? &lt;label:IDN&gt;
+<hr>ELSE <i>label</i></td>
+<td colspan='4'><b>004C</b> ???? &lt;label:IDN&gt;
+<hr>ELSE <i>label</i></td>
+<td class='description'>Implicit <tt>GOTO</tt><br>Appears within a single line <tt>IF</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0076</b> ????
+<hr>ELSEIF <i>a</i> THEN</td>
+<td colspan='4'>&lt;a&gt; <b>004D</b> ????
+<hr>ELSEIF <i>a</i> THEN</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0077</b>
+<hr>END</td>
+<td colspan='4'><b>004E</b>
+<hr>END</td>
+<td class='description'>See also <tt>0195</tt></td>
+</tr>
+
+<tr>
+<td><b>0078</b> ???? ????
+<hr>END DEF</td>
+<td colspan='4'><b>004F</b> ???? ????
+<hr>END DEF</td>
+<td class='description'>Terminates a multiline <tt>DEF FN</tt> statement</td>
+</tr>
+
+<tr>
+<td><b>0079</b>
+<hr>END IF</td>
+<td colspan='4'><b>0050</b>
+<hr>END IF</td>
+<td class='description'>Terminates a multiline <tt>IF</tt> statement</td>
+</tr>
+
+<tr>
+<td><b>007A</b>
+<hr>END FUNCTION
+<br>END SUB</td>
+<td colspan='4'><b>0051</b>
+<hr>END FUNCTION
+<br>END SUB</td>
+<td class='description'>Terminates a <tt>SUB</tt> or <tt>FUNCTION</tt>, the type depends on where it appears</td>
+</tr>
+
+<tr>
+<td><b>007B</b>
+<hr>END SELECT</td>
+<td colspan='4'><b>0052</b>
+<hr>END SELECT</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>007C</b> ????
+<hr>EXIT DO</td>
+<td colspan='4'><b>0053</b> ????
+<hr>EXIT DO</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>007D</b> ????
+<hr>EXIT FOR</td>
+<td colspan='4'><b>0054</b> ????
+<hr>EXIT FOR</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>007E</b> ????
+<hr>EXIT DEF
+<br>EXIT FUNCTION
+<br>EXIT SUB</td>
+<td colspan='4'><b>0055</b> ????
+<hr>EXIT DEF
+<br>EXIT FUNCTION
+<br>EXIT SUB</td>
+<td class='description'>The type depends on where it appears</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>007F</b> ???? ????
+<hr>FOR <i>a</i> = <i>b</i> TO <i>c</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>0056</b> ???? ????
+<hr>FOR <i>a</i> = <i>b</i> TO <i>c</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; <b>0080</b> ???? ????
+<hr>FOR <i>a</i> = <i>b</i> TO <i>c</i> STEP <i>d</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; <b>0057</b> ???? ????
+<hr>FOR <i>a</i> = <i>b</i> TO <i>c</i> STEP <i>d</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0081</b> ???? &lt;name:IDN&gt; &lt;flags:U16&gt; &lt;N:U16&gt; {&lt;arg&gt;}<sup>N</sup>
+<hr>FUNCTION <i>name</i>[(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)]</td>
+<td colspan='4'><b>0058</b> ???? &lt;name:IDN&gt; &lt;flags:U16&gt; &lt;N:U16&gt; {&lt;arg&gt;}<sup>N</sup>
+<hr>FUNCTION <i>name</i>[(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)]</td>
+<td class='description'>Begins a <tt>FUNCTION</tt> definition.
+<br>The format is almost identical to a <tt>DECLARE</tt> statement, except that <i>flags</i> must encode a function.
+<br>Also, no <tt>CDECL</tt> or alias is permitted.
+<br>The arguments have the same encoding as for <tt>DECLARE</tt>, with the following additions:
+<br>If the bit <tt>2000</tt> is set, an explicit <tt>AS</tt> type definition is present (this was the default for a <tt>DECLARE</tt> statement).
+<br>Note that the <tt>STATIC</tt> keyword is not stored in the opcode stream.</td>
+</tr>
+
+<tr>
+<td><b>0082</b> &lt;label:IDN&gt;
+<hr>GOSUB <i>label</i></td>
+<td colspan='4'><b>0059</b> &lt;label:IDN&gt;
+<hr>GOSUB <i>label</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0084</b> &lt;label:IDN&gt;
+<hr>GOTO <i>label</i></td>
+<td colspan='4'><b>005B</b> &lt;label:IDN&gt;
+<hr>GOTO <i>label</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0086</b> ???? &lt;b&gt; [(0072 ???? &lt;c&gt; | 0075 ???? &lt;label:IDN&gt;)]
+<hr>IF <i>a</i> THEN <i>b</i> [(ELSE <i>c</i> | ELSE <i>label</i>)]</td>
+<td colspan='4'>&lt;a&gt; <b>005D</b> ???? &lt;b&gt; [(0049 ???? &lt;c&gt; | 004C ???? &lt;label:IDN&gt;)]
+<hr>IF <i>a</i> THEN <i>b</i> [(ELSE <i>c</i> | ELSE <i>label</i>)]</td>
+<td class='description'>Single line <tt>IF</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0087</b> &lt;label<sub>1</sub>:IDN&gt; [(0072 ???? &lt;b&gt; | 0075 ???? &lt;label<sub>2</sub>:IDN&gt;)]
+<hr>IF <i>a</i> THEN <i>label</i><sub>1</sub> [(ELSE <i>b</i> | ELSE <i>label</i><sub>2</sub>)]</td>
+<td colspan='4'>&lt;a&gt; <b>005E</b> &lt;label<sub>1</sub>:IDN&gt; [(0049 ???? &lt;b&gt; | 004C ???? &lt;label<sub>2</sub>:IDN&gt;)]
+<hr>IF <i>a</i> THEN <i>label</i><sub>1</sub> [(ELSE <i>b</i> | ELSE <i>label</i><sub>2</sub>)]</td>
+<td class='description'>Single line <tt>IF</tt> statement with implicit <tt>GOTO</tt></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>008A</b> ????
+<hr>IF <i>a</i> THEN</td>
+<td colspan='4'>&lt;a&gt; <b>0061</b> ????
+<hr>IF <i>a</i> THEN</td>
+<td class='description'>Initiates a multiline <tt>IF</tt> statement</td>
+</tr>
+
+<tr>
+<td><b>008B</b> ????
+<hr>LOOP</td>
+<td colspan='4'><b>0062</b> ????
+<hr>LOOP</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>008C</b> ????
+<hr>LOOP UNTIL <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0063</b> ????
+<hr>LOOP UNTIL <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>008D</b> ????
+<hr>LOOP WHILE <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0064</b> ????
+<hr>LOOP WHILE <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>008E</b> ???? ????
+<hr>NEXT</td>
+<td colspan='4'><b>0065</b> ???? ????
+<hr>NEXT</td>
+<td class='description'>A <tt>NEXT</tt> statement with no variables</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>008F</b> ???? ????
+<hr>NEXT <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0066</b> ???? ????
+<hr>NEXT <i>a</i></td>
+<td class='description'>Each variable in a <tt>NEXT</tt> statement gets one entry</td>
+</tr>
+
+<tr>
+<td><b>0090</b> &lt;label:IDN&gt;
+<hr>ON ERROR GOTO <i>label</i></td>
+<td><b>0067</b> &lt;label:IDN&gt;
+<hr>ON ERROR GOTO <i>label</i></td>
+<td colspan='3'><b>0067</b> &lt;label:IDN&gt;
+<hr>ON ERROR GOTO <i>label</i>
+<hr><b>0067</b> FFFF
+<hr>ON ERROR GOTO 0
+<hr><b>0067</b> FFFE
+<hr>ON ERROR RESUME NEXT</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0091</b> &lt;N*2:U16&gt; {&lt;label:IDN&gt;}<sup>N</sup>
+<hr>ON <i>a</i> GOSUB <i>label</i><sub>1</sub>, &hellip;, <i>label</i><sub><i>N</i></sub></td>
+<td colspan='4'>&lt;a&gt; <b>0068</b> &lt;N*2:U16&gt; {&lt;label:IDN&gt;}<sup>N</sup>
+<hr>ON <i>a</i> GOSUB <i>label</i><sub>1</sub>, &hellip;, <i>label</i><sub><i>N</i></sub></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0092</b> &lt;N*2:U16&gt; {&lt;label:IDN&gt;}<sup>N</sup>
+<hr>ON <i>a</i> GOTO <i>label</i><sub>1</sub>, &hellip;, <i>label</i><sub><i>N</i></sub></td>
+<td colspan='4'>&lt;a&gt; <b>0069</b> &lt;N*2:U16&gt; {&lt;label:IDN&gt;}<sup>N</sup>
+<hr>ON <i>a</i> GOTO <i>label</i><sub>1</sub>, &hellip;, <i>label</i><sub><i>N</i></sub></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0093</b>
+<hr>RESTORE</td>
+<td colspan='4'><b>006A</b>
+<hr>RESTORE</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0094</b> &lt;label:IDN&gt;
+<hr>RESTORE <i>label</i></td>
+<td colspan='4'><b>006B</b> &lt;label:IDN&gt;
+<hr>RESTORE <i>label</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0095</b>
+<hr>RESUME</td>
+<td colspan='4'><b>006C</b>
+<hr>RESUME</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0096</b> &lt;label:IDN&gt;
+<hr>RESUME <i>label</i>
+<hr><b>0096</b> FFFF
+<hr>RESUME 0</td>
+<td colspan='4'><b>006D</b> &lt;label:IDN&gt;
+<hr>RESUME <i>label</i>
+<hr colspan='4'><b>006D</b> FFFF
+<hr>RESUME 0</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0097</b>
+<hr>RESUME NEXT</td>
+<td colspan='4'><b>006E</b>
+<hr>RESUME NEXT</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0098</b>
+<hr>RETURN</td>
+<td colspan='4'><b>006F</b>
+<hr>RETURN</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0099</b> &lt;label:IDN&gt;
+<hr>RETURN <i>label</i></td>
+<td colspan='4'><b>0070</b> &lt;label:IDN&gt;
+<hr>RETURN <i>label</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>009A</b>
+<hr>RUN <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0071</b>
+<hr>RUN <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>009B</b> &lt;label:IDN&gt;
+<hr>RUN <i>label</i></td>
+<td colspan='4'><b>0072</b> &lt;label:IDN&gt;
+<hr>RUN <i>label</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>009C</b>
+<hr>RUN</td>
+<td colspan='4'><b>0073</b>
+<hr>RUN</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>009D</b> ????
+<hr>SELECT CASE <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0074</b> ????
+<hr>SELECT CASE <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>009E</b> 00C1
+<hr>STOP</td>
+<td colspan='4'><b>0075</b> 0098
+<hr>STOP</td>
+<td class='description'>See also <tt>01A4</tt></td>
+</tr>
+
+<tr>
+<td><b>009F</b> ???? &lt;name:IDN&gt; &lt;flags:U16&gt; &lt;N:U16&gt; {&lt;arg&gt;}<sup>N</sup>
+<hr>SUB <i>name</i>[(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)]</td>
+<td colspan='4'><b>0076</b> ???? &lt;name:IDN&gt; &lt;flags:U16&gt; &lt;N:U16&gt; {&lt;arg&gt;}<sup>N</sup>
+<hr>SUB <i>name</i>[(<i>arg</i><sub>1</sub>, &hellip;, <i>arg</i><sub><i>N</i></sub>)]</td>
+<td class='description'>Begins a <tt>SUB</tt> definition.
+<br>The format is almost identical to a <tt>FUNCTION</tt> statement, except that <i>flags</i> must encode a sub.
+<br>Note that the <tt>STATIC</tt> keyword is not stored in the opcode stream.</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00A0</b>
+<hr>WAIT <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0077</b>
+<hr>WAIT <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>00A1</b>
+<hr>WAIT <i>a</i>, <i>b</i>, <i>c</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>0078</b>
+<hr>WAIT <i>a</i>, <i>b</i>, <i>c</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>00A2</b> ????
+<hr>WEND</td>
+<td colspan='4'><b>0079</b> ????
+<hr>WEND</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00A3</b> ????
+<hr>WHILE <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>007A</b> ????
+<hr>WHILE <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;#filenum&gt; <b>00A6</b> {&lt;item<sup>00B8, 00B9, 00BA, 00BB, 00BD, 00BE</sup>&gt;} &lt;item<sup>00BC, 00BF</sup>&gt;
+<hr>PRINT <i>#filenum</i>, &lt;item&gt;<sub>1</supb> &hellip;</td>
+<td colspan='4'>&lt;#filenum&gt; <b>007D</b> {&lt;item<sup>008F, 0090, 0091, 0092, 0094, 0095</sup>&gt;} &lt;item<sup>0093, 0096</sup>&gt;
+<hr>PRINT <i>#filenum</i>, &lt;item&gt;<sub>1</supb> &hellip;</td>
+<td class='description'><i>#filenum</i> is an expression that encodes a file number with the # symbol, to avoid syntactical ambiguity</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00A7</b></td>
+<td colspan='4'>&lt;a&gt; <b>007E</b></td>
+<td class='description'>Sets position argument 6 of <tt>CIRCLE</tt> (aspect ratio)</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00A8</b></td>
+<td colspan='4'>&lt;a&gt; <b>007F</b></td>
+<td class='description'>Sets position argument 5 of <tt>CIRCLE</tt> (end angle)</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00A9</b></td>
+<td colspan='4'>&lt;a&gt; <b>0080</b></td>
+<td class='description'>Sets position argument 4 of <tt>CIRCLE</tt> (start angle)</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00AA</b>
+<hr>(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0081</b>
+<hr>(<i>a</i>, <i>b</i>)
+<td rowspan='2' class='description'>Sets first coordinate argument of <tt>CIRCLE</tt>/<tt>GET</tt>/<tt>LINE</tt>/<tt>PAINT</tt>/<tt>PRESET</tt>/<tt>PSET</tt>/<tt>PUT</tt></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00AB</b>
+<hr>STEP (<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0082</b>
+<hr>STEP (<i>a</i>, <i>b</i>)
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00AC</b>
+<hr>(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0083</b>
+<hr>(<i>a</i>, <i>b</i>)
+<td rowspan='2' class='description'>Sets second coordinate argument of <tt>GET</tt>/<tt>LINE</tt></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00AD</b>
+<hr>STEP (<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0084</b>
+<hr>STEP (<i>a</i>, <i>b</i>)
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00AE</b> {&lt;assoc<sup>00AF</sup>&gt;}
+<hr>FIELD <i>a</i>, <i>assoc</i><sub>1</sub>, &hellip;</td>
+<td colspan='4'>&lt;a&gt; <b>0085</b> {&lt;assoc<sup>0086</sup>&gt;}
+<hr>FIELD <i>a</i>, <i>assoc</i><sub>1</sub>, &hellip;</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00AF</b>
+<hr><i>a</i> AS <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0086</b>
+<hr><i>a</i> AS <i>b</i></td>
+<td class='description'>Appears in a <tt>FIELD</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;#filenum&gt; <b>00B0</b>
+<hr>[LINE] INPUT <i>#filenum</i>, &hellip;</td>
+<td colspan='4'>&lt;#filenum&gt; <b>0087</b>
+<hr>[LINE] INPUT <i>#filenum</i>, &hellip;</td>
+<td class='description'><i>#filenum</i> is an expression that encodes a file number with the # symbol, to avoid syntactical ambiguity.
+<br>Appears in an <tt>INPUT</tt>, <tt>LINE INPUT</tt> statement, as the first element.</td>
+</tr>
+
+<tr>
+<td>(&lt;#filenum<sup>00B0</sup>&gt; OR &lt;input<sup>00B2</sup>&gt;) {&lt;item<sup>00DF</sup>&gt;} <b>00B1</b>
+<hr>INPUT [<i>#filenum</i>,] <i>item</i><sub>1</sub>, &hellip;</td>
+<td colspan='4'>(&lt;#filenum<sup>0087</sup>&gt; {&lt;item<sup>00B6</sup>&gt;} OR &lt;input<sup>0089</sup>&gt;) <b>0088</b>
+<hr>INPUT [<i>#filenum</i>,] <i>item</i><sub>1</sub>, &hellip;</td>
+<td class='description'>Terminates the item list in an <tt>INPUT</tt> statement</td>
+</tr>
+
+<tr>
+<td>[&lt;prompt&gt;] <b>00B2</b> &lt;N+1:U16&gt; &lt;flags:U16&gt; [???? IF N&gt;1] {&lt;item<sup>00DF</sup>&gt;}<sup>N</sup> 00B1
+<hr>INPUT [;] [<i>prompt</i> (; | ,)] <i>item</i><sub>1</sub>, &hellip;, <i>item</i><sub><i>N</i></sub></td>
+<td colspan='4'>[&lt;prompt&gt;] <b>0089</b> &lt;N+1:U16&gt; &lt;flags:U16&gt; [???? IF N&gt;1] {&lt;item<sup>00B6</sup>&gt;}<sup>N</sup> 0088
+<hr>INPUT [;] [<i>prompt</i> (; | ,)] <i>item</i><sub>1</sub>, &hellip;, <i>item</i><sub><i>N</i></sub></td>
+<td class='description'><i>flags</i> selects how the initial part of the statement is interpreted
+<br>Bit <tt>0002</tt> is set when it is an <tt>INPUT;</tt> statement
+<br>Bit <tt>0004</tt> is set when the prompt parameter is present, <tt>INPUT a;</tt>
+<br>Bits <tt>0005</tt> are set when the prompt parameter is followed by a comma, <tt>INPUT a,</tt></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00B3</b>
+<hr>#<i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>008A</b>
+<hr>#<i>a</i></td>
+<td class='description'>File number</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00B8</b>
+<hr>SPC(<i>a</i>); &hellip;</td>
+<td colspan='4'>&lt;a&gt; <b>008F</b>
+<hr>SPC(<i>a</i>); &hellip;</td>
+<td class='description'>Appears in a <tt>LPRINT</tt>, <tt>PRINT</tt>, <tt>WRITE</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00B9</b>
+<hr>TAB(<i>a</i>); &hellip;</td>
+<td colspan='4'>&lt;a&gt; <b>0090</b>
+<hr>TAB(<i>a</i>); &hellip;</td>
+<td class='description'>Appears in a <tt>LPRINT</tt>, <tt>PRINT</tt>, <tt>WRITE</tt> statement</td>
+</tr>
+
+<tr>
+<td><b>00BA</b>
+<hr><i>empty</i>, &hellip;</td>
+<td colspan='4'><b>0091</b>
+<hr><i>empty</i>, &hellip;</td>
+<td class='description'>Appears in a <tt>LPRINT</tt>, <tt>PRINT</tt>, <tt>WRITE</tt> statement</td>
+</tr>
+
+<tr>
+<td><b>00BB</b>
+<hr><i>empty</i>; &hellip;</td>
+<td colspan='4'><b>0092</b>
+<hr><i>empty</i>; &hellip;</td>
+<td class='description'>Appears in a <tt>LPRINT</tt>, <tt>PRINT</tt>, <tt>WRITE</tt> statement</td>
+</tr>
+
+<tr>
+<td><b>00BC</b>
+<hr><i>empty</i></td>
+<td colspan='4'><b>0093</b>
+<hr><i>empty</i></td>
+<td class='description'>Terminates an item list in a <tt>PRINT</tt> statement
+<br>Encodes an empty <tt>PRINT</tt> statement, or follows a final <tt>,</tt> or <tt>;</tt> symbol
+<br>Appears in a <tt>LPRINT</tt>, <tt>PRINT</tt>, <tt>WRITE</tt> statement
+<br>Note that a simple <tt>PRINT</tt> statement takes no special prefix opcode</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00BD</b>
+<hr><i>a</i>, &hellip;</td>
+<td colspan='4'>&lt;a&gt; <b>0094</b>
+<hr><i>a</i>, &hellip;</td>
+<td class='description'>Appears in a <tt>LPRINT</tt>, <tt>PRINT</tt>, <tt>WRITE</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00BE</b>
+<hr><i>a</i>; &hellip;</td>
+<td colspan='4'>&lt;a&gt; <b>0095</b>
+<hr><i>a</i>; &hellip;</td>
+<td class='description'>Appears in a <tt>LPRINT</tt>, <tt>PRINT</tt>, <tt>WRITE</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00BF</b>
+<hr><i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0096</b>
+<hr><i>a</i></td>
+<td class='description'>Terminates an item list in a <tt>PRINT</tt> statement
+<br>Encodes the final item, unless it is followed by a <tt>,</tt> or <tt>;</tt> symbol
+<br>Appears in a <tt>LPRINT</tt>, <tt>PRINT</tt>, <tt>WRITE</tt> statement
+<br>Note that a simple <tt>PRINT</tt> statement takes no special prefix opcode</td>
+</tr>
+
+<tr>
+<td><b>00C0</b> &lt;text:STR&gt;
+<hr>'<i>text</i></td>
+<td colspan='4'><b>0097</b> &lt;text:STR&gt;
+<hr>'<i>text</i></td>
+<td class='description'>The first two bytes of the string encode the 0-based column number where the comment (<tt>'</tt> symbol) begins.
+<br>Characters appearing more than 3 times are compactified: <tt>0D &lt;count:U8&gt; &lt;char:U8&gt;</tt>.</td>
+</tr>
+
+<tr>
+<td><b>00C1</b></td>
+<td colspan='4'><b>0098</b></td>
+<td class='description'>Appears in a <tt>STOP</tt> statement</td>
+</tr>
+
+<tr>
+<td>&lt;REM<sup>00C0, 010C</sup>&gt; <b>00C2</b> &lt;filename:STR&gt;
+<hr><i>REM</i> $INCLUDE: <i>filename</i></td>
+<td colspan='4'>&lt;REM<sup>0097, 00E3</sup>&gt; <b>0099</b> &lt;filename:STR&gt;
+<hr><i>REM</i> $INCLUDE: <i>filename</i></td>
+<td class='description'></td>
+</tr>
+
+
+<tr>
+<td><b>00C3</b>
+<hr>BEEP</td>
+<td colspan='4'><b>009A</b>
+<hr>BEEP</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00C4</b>
+<hr>BLOAD <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>009B</b>
+<hr>BLOAD <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00C5</b>
+<hr>BLOAD <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>009C</b>
+<hr>BLOAD <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>00C6</b>
+<hr>BSAVE <i>a</i>, <i>b</i>, <i>c</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>009D</b>
+<hr>BSAVE <i>a</i>, <i>b</i>, <i>c</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00C7</b>
+<hr>CHDIR <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>009E</b>
+<hr>CHDIR <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; &lt;b&gt; [&lt;d<sup>00A9</sup>&gt; OR 01A8 [&lt;e<sup>00A8</sup>&gt; OR 01A8 [&lt;f<sup>00A7</sup>&gt;]]] <b>00C8</b>
+<hr>CIRCLE <i>a</i><sup>[STEP] (x1, y1)</sup>, <i>b</i>, , [<i>d</i>], [<i>e</i>], [<i>f</i>]</td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; &lt;b&gt; [&lt;d<sup>0080</sup>&gt; OR 0172 [&lt;e<sup>007F</sup>&gt; OR 0172 [&lt;f<sup>007E</sup>&gt;]]] <b>009F</b>
+<hr>CIRCLE <i>a</i><sup>[STEP] (x1, y1)</sup>, <i>b</i>, , [<i>d</i>], [<i>e</i>], [<i>f</i>]</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; &lt;b&gt; &lt;c&gt; [&lt;d<sup>00A9</sup>&gt; OR 01A8 [&lt;e<sup>00A8</sup>&gt; OR 01A8 [&lt;f<sup>00A7</sup>&gt;]]] <b>00C9</b>
+<hr>CIRCLE <i>a</i><sup>[STEP] (x1, y1)</sup>, <i>b</i>, <i>c</i>, [<i>d</i>], [<i>e</i>], [<i>f</i>]</td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; &lt;b&gt; &lt;c&gt; [&lt;d<sup>0080</sup>&gt; OR 0172 [&lt;e<sup>007F</sup>&gt; OR 0172 [&lt;f<sup>007E</sup>&gt;]]] <b>00A0</b>
+<hr>CIRCLE <i>a</i><sup>[STEP] (x1, y1)</sup>, <i>b</i>, <i>c</i>, [<i>d</i>], [<i>e</i>], [<i>f</i>]</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>00CA</b> 0000
+<hr>CLEAR
+<hr>01A8 01A8 01A9 &lt;a&gt; <b>00CA</b> 0004
+<hr>CLEAR , , <i>a</i></td>
+<td colspan='4'><b>00A1</b> 0000
+<hr>CLEAR
+<hr>0172 0172 0173 &lt;a&gt; <b>00A1</b> 0004
+<hr>CLEAR , , <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>{&lt;a&gt;}<sup>N</sup> <b>00CB</b> &lt;N:U16&gt;
+<hr>CLOSE &lt;a&gt;<sub>1</sub>, &hellip;, &lt;a&gt;<sub><i>N</i></sub></td>
+<td colspan='4'>{&lt;a&gt;}<sup>N</sup> <b>00A2</b> &lt;N:U16&gt;
+<hr>CLOSE &lt;a&gt;<sub>1</sub>, &hellip;, &lt;a&gt;<sub><i>N</i></sub></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>(&lt;a&gt; OR 01A9) <b>00CC</b>
+<hr>CLS [<i>a</i>]</td>
+<td colspan='4'>(&lt;a&gt; OR 0173) <b>00A3</b>
+<hr>CLS [<i>a</i>]</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>{01A9 &lt;a&gt;}<sup>N</sup> <b>00CB</b> &lt;2 * N:U16&gt;
+<hr>COLOR &lt;a&gt;<sub>1</sub>, &hellip;, &lt;a&gt;<sub><i>N</i></sub></td>
+<td colspan='4'>{0173 &lt;a&gt;}<sup>N</sup> <b>00A4</b> &lt;2 * N:U16&gt;
+<hr>COLOR &lt;a&gt;<sub>1</sub>, &hellip;, &lt;a&gt;<sub><i>N</i></sub></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>[0040 IF SHARED] <b>00CE</b> ???? (&lt;name:IDN&gt; OR FFFF) {&lt;decl<sup>0017-001C, 0029-002E</sup>&gt;}
+<hr>COMMON [SHARED] [/<i>name</i>/] &lt;decl&gt;<sub>1</sub>, &hellip;</td>
+<td colspan='4'>[001A IF SHARED] <b>00A5</b> ???? (&lt;name:IDN&gt; OR FFFF) {&lt;decl<sup>000D, 0010</sup>&gt;}
+<hr>COMMON [SHARED] [/<i>name</i>/] &lt;decl&gt;<sub>1</sub>, &hellip;</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>00CF</b> &lt;character sequence:STR&gt;
+<hr>DATA <i>character sequence</i></td>
+<td colspan='4'><b>00A6</b> &lt;character sequence:STR&gt;
+<hr>DATA <i>character sequence</i></td>
+<td class='description'>The first two bytes and last byte in the character sequence are unknown and seem to be 0.</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00D0</b>
+<hr>DATE$ = <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00A7</b>
+<hr>DATE$ = <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>00D1</b>
+<hr>DEF SEG</td>
+<td colspan='4'><b>00A8</b>
+<hr>DEF SEG</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00D2</b>
+<hr>DEF SEG = <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00A9</b>
+<hr>DEF SEG = <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00D3</b>
+<hr>DRAW <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00AA</b>
+<hr>DRAW <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00D4</b>
+<hr>ENVIRON <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00AB</b>
+<hr>ENVIRON <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>{&lt;a<sup>0029-002E</sup>&gt;}<sup>N</sup> <b>00D5</b> &lt;N:U16&gt;
+<hr>ERASE &lt;a&gt;<sub>1</sub>, &hellip;, &lt;a&gt;<sub><i>N</i></sub></td>
+<td>{&lt;a<sup>000E</sup>&gt;}<sup>N</sup> <b>00AC</b> &lt;N:U16&gt;
+<hr>ERASE &lt;a&gt;<sub>1</sub>, &hellip;, &lt;a&gt;<sub><i>N</i></sub></td>
+<td colspan='3'>{&lt;a<sup>000E</sup>&gt; <b>00AC</b>}
+<hr>ERASE &lt;a&gt;<sub>1</sub>, &hellip;</td>
+<td class='description'>Note: QuickBASIC 4.0 uses a different encoding for the arrays than later versions</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00D6</b>
+<hr>ERROR <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00AD</b>
+<hr>ERROR <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>00D7</b>
+<hr>FILES</td>
+<td colspan='4'><b>00AE</b>
+<hr>FILES</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00D8</b>
+<hr>FILES <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00AF</b>
+<hr>FILES <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00D9</b>
+<hr>GET <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00B0</b>
+<hr>GET <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00DA</b>
+<hr>GET <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00B1</b>
+<hr>GET <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;c&gt; <b>00DB</b> ????
+<hr>GET <i>a</i>, , <i>c</i></td>
+<td colspan='4'>&lt;a&gt; &lt;c&gt; <b>00B2</b> ????
+<hr>GET <i>a</i>, , <i>c</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>00DC</b> ????
+<hr>GET <i>a</i>, <i>b</i>, <i>c</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>00B3</b> ????
+<hr>GET <i>a</i>, <i>b</i>, <i>c</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; &lt;b<sup>00AC, 00AD</sup>&gt; &lt;arrayspec<sup>0029-002E</sup>&gt; <b>00DD</b>
+<hr>GET <i>a</i><sup>[STEP] (x1, y1)</sup>-<i>b</i><sup>[STEP] (x2, y2)</sup>, <i>arrayspec</i></td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; &lt;b<sup>0083, 0084</sup>&gt; &lt;arrayspec<sup>000E</sup>&gt; <b>00B4</b>
+<hr>GET <i>a</i><sup>[STEP] (x1, y1)</sup>-<i>b</i><sup>[STEP] (x2, y2)</sup>, <i>arrayspec</i></td>
+<td class='description'>Note: QuickBASIC 4.0 uses a different encoding for <i>arrayspec</i> than later versions</td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>0081, 0082</sup>&gt; &lt;arrayspec<sup>0029-002E</sup>&gt; <b>00DE</b> &lt;method:U16&gt;
+<hr>PUT <i>a</i><sup>[STEP] (x, y)</sup>, <i>arrayspec</i>[, <i>method</i>]</td>
+<td colspan='4'>&lt;a<sup>00AA, 00AB</sup>&gt; &lt;arrayspec<sup>000E</sup>&gt; <b>00B5</b> &lt;method:U16&gt;
+<hr>PUT <i>a</i><sup>[STEP] (x, y)</sup>, <i>arrayspec</i>[, <i>method</i>]</td>
+<td class='description'>The following methods are defined:
+<table border='1'>
+<tr>
+<td>0000</td>
+<td>OR</td>
+</tr>
+<tr>
+<td>0001</td>
+<td>AND</td>
+</tr>
+<tr>
+<td>0002</td>
+<td>PRESET</td>
+</tr>
+<tr>
+<td>0003</td>
+<td>PSET</td>
+</tr>
+<tr>
+<td>0004</td>
+<td>XOR</td>
+</tr>
+<tr>
+<td>FFFF</td>
+<td>no method specified</td>
+</tr>
+</table>
+<br>Note: QuickBASIC 4.0 uses a different encoding for <i>arrayspec</i> than later versions</td>
+</tr>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00DF</b></td>
+<td colspan='4'>&lt;a&gt; <b>00B6</b></td>
+<td class='description'>Argument to an <tt>INPUT</tt> statement.</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00E0</b>
+<hr>IOCTL <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00B7</b>
+<hr>IOCTL <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>00E1</b> (0000 IF OFF ELSE 0001 IF ON ELSE 0002 IF LIST)
+<hr>KEY (OFF | ON | LIST)</td>
+<td colspan='4'><b>00B8</b> (0000 IF OFF ELSE 0001 IF ON ELSE 0002 IF LIST)
+<hr>KEY (OFF | ON | LIST)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00E2</b>
+<hr>KEY <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00B9</b>
+<hr>KEY <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00E3</b>
+<hr>KILL <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00BA</b>
+<hr>KILL <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; &lt;b<sup>00AC, 00AD</sup>&gt; <b>00E4</b> &lt;flags:U16&gt;
+<hr>LINE <i>a</i><sup>[STEP] (x1, y1)</sup>-<i>b</i><sup>[STEP] (x2, y2)</sup>, , [B[F]]</td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; &lt;b<sup>0083, 0084</sup>&gt; <b>00BB</b> &lt;flags:U16&gt;
+<hr>LINE <i>a</i><sup>[STEP] (x1, y1)</sup>-<i>b</i><sup>[STEP] (x2, y2)</sup>, , [B[F]]</td>
+<td rowspan='4' class='description'>The following <i>flags</i> values are known:
+<table border='1'>
+<tr>
+<td>0000</td>
+<td>no BF</td>
+</tr>
+<tr>
+<td>0001</td>
+<td>B</td>
+</tr>
+<tr>
+<td>0002</td>
+<td>BF</td>
+</tr>
+</table>
+</td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; &lt;b<sup>00AC, 00AD</sup>&gt; &lt;c&gt; <b>00E5</b> &lt;flags:U16&gt;
+<hr>LINE <i>a</i><sup>[STEP] (x1, y1)</sup>-<i>b</i><sup>[STEP] (x2, y2)</sup>, <i>c</i>, [B[F]]</td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; &lt;b<sup>0083, 0084</sup>&gt; &lt;c&gt; <b>00BC</b> &lt;flags:U16&gt;
+<hr>LINE <i>a</i><sup>[STEP] (x1, y1)</sup>-<i>b</i><sup>[STEP] (x2, y2)</sup>, <i>c</i>, [B[F]]</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; &lt;b<sup>00AC, 00AD</sup>&gt; &lt;d&gt; <b>00E6</b> &lt;flags:U16&gt;
+<hr>LINE <i>a</i><sup>[STEP] (x1, y1)</sup>-<i>b</i><sup>[STEP] (x2, y2)</sup>, , [B[F]], <i>d</i></td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; &lt;b<sup>0083, 0084</sup>&gt; &lt;d&gt; <b>00BD</b> &lt;flags:U16&gt;
+<hr>LINE <i>a</i><sup>[STEP] (x1, y1)</sup>-<i>b</i><sup>[STEP] (x2, y2)</sup>, , [B[F]], <i>d</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; &lt;b<sup>00AC, 00AD</sup>&gt; &lt;c&gt; &lt;d&gt; <b>00E7</b> &lt;flags:U16&gt;
+<hr>LINE <i>a</i><sup>[STEP] (x1, y1)</sup>-<i>b</i><sup>[STEP] (x2, y2)</sup>, <i>c</i>, [B[F]], <i>d</i></td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; &lt;b<sup>0083, 0084</sup>&gt; &lt;c&gt; &lt;d&gt; <b>00BE</b> &lt;flags:U16&gt;
+<hr>LINE <i>a</i><sup>[STEP] (x1, y1)</sup>-<i>b</i><sup>[STEP] (x2, y2)</sup>, <i>c</i>, [B[F]], <i>d</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>00E8</b> &lt;assign&gt;
+<hr>LET <i>assign</i></td>
+<td colspan='4'><b>00BF</b> &lt;assign&gt;
+<hr>LET <i>assign</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>[&lt;#filenum<sup>00B0</sup>&gt; OR &lt;a&gt;] &lt;b&gt; <b>00E9</b> &lt;flags:U16&gt;
+<hr>LINE INPUT (<i>#filenum</i>, | [;] [<i>a</i>;]) <i>b</i></td>
+<td colspan='4'>[&lt;#filenum<sup>0087</sup>&gt; OR &lt;a&gt;] &lt;b&gt; <b>00C0</b> &lt;flags:U16&gt;
+<hr>LINE INPUT (<i>#filenum</i>, | [;] [<i>a</i>;]) <i>b</i></td>
+<td class='description'>The <i>flags</i> parameter contains the following bits.
+<br>Bit <tt>0002</tt> is set if the <tt>LINE INPUT</tt> command is immediately followed by a <tt>;</tt> symbol.
+<br>Bit <tt>0004</tt> is set if <i>a</i> is present.
+<br>Note that if <i>#filenum</i> is present, <i>flags</i> should be <tt>0000</tt>.</td>
+</tr>
+
+<tr>
+<td>{01A9 &lt;a&gt; OR 01A8}<sup>N</sup> <b>00EA</b> &lt;N<sup>*</sup>&gt;
+<br>LOCATE [<i>a</i><sub>1</sub>], &hellip;, [<i>a</i><sub><i>N</i></sub>]</td>
+<td colspan='4'>{0173 &lt;a&gt; OR 0172}<sup>N</sup> <b>00C1</b> &lt;N<sup>*</sup>&gt;
+<br>LOCATE [<i>a</i><sub>1</sub>], &hellip;, [<i>a</i><sub><i>N</i></sub>]</td>
+<td class='description'>The parameter <tt>N<sup>*</sup></tt> is the sum of the number of argument positions and the number of arguments actually present.
+<br>If all positions are present, it is equal to 2 * <i>N</i>.</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; [(&lt;b&gt; OR &lt;1<sup>0191</sup>&gt;) [&lt;c&gt;]] <b>00EB</b> &lt;flags:U16&gt;
+<hr>LOCK <i>a</i>[, (<i>b</i> | [<i>b</i>] TO <i>c</i>)]</td>
+<td colspan='4'>&lt;a&gt; [(&lt;b&gt; OR &lt;1<sup><span class='parametrized'>05</span>64</sup>&gt;) [&lt;c&gt;]] <b>00C2</b> &lt;flags:U16&gt;
+<hr>LOCK <i>a</i>[, (<i>b</i> | [<i>b</i>] TO <i>c</i>)]</td>
+<td class='description'>The <i>flags</i> parameter determines the format of the LOCK function.
+<br>
+<table border='1'>
+<tr>
+<td>0000</td>
+<td>LOCK <i>a</i></td>
+</tr>
+<tr>
+<td>0002</td>
+<td>LOCK <i>a</i>, <i>b</i> TO <i>c</i></td>
+</tr>
+<tr>
+<td>4002</td>
+<td>LOCK <i>a</i>, TO <i>c</i> <span class='description'>(Note that a single token for 1 is present)</span></td>
+</tr>
+<tr>
+<td>8002</td>
+<td>LOCK <i>a</i>, <i>b</i></td>
+</tr>
+</table>
+</td>
+</tr>
+
+<tr>
+<td><b>00EC</b> (&lt;a<sup>0128</sup>&gt; IF USING) {&lt;item<sup>00B8, 00B9, 00BA, 00BB, 00BD, 00BE</sup>&gt;} &lt;item<sup>00BC, 00BF</sup>&gt;
+<hr>LPRINT [USING &lt;a&gt;;] &lt;item&gt;<sub>1</supb> &hellip;</td>
+<td colspan='4'><b>00C3</b> (&lt;a<sup>00FF</sup>&gt; IF USING) {&lt;item<sup>008F, 0090, 0091, 0092, 0094, 0095</sup>&gt;} &lt;item<sup>0093, 0096</sup>&gt;
+<hr>LPRINT [USING &lt;a&gt;;] &lt;item&gt;<sub>1</supb> &hellip;</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00ED</b>
+<hr>LSET <i>a</i> = <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00C4</b>
+<hr>LSET <i>a</i> = <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>00EE</b>
+<hr>MID$(<i>c</i>, <i>a</i>) = <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>00C5</b>
+<hr>MID$(<i>c</i>, <i>a</i>) = <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; <b>00EF</b>
+<hr>MID$(<i>d</i>, <i>a</i>, <i>b</i>) = <i>c</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; <b>00C6</b>
+<hr>MID$(<i>d</i>, <i>a</i>, <i>b</i>) = <i>c</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00F0</b>
+<hr>MKDIR <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00C7</b>
+<hr>MKDIR <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00F1</b>
+<hr>NAME <i>a</i> AS <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00C8</b>
+<hr>NAME <i>a</i> AS <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00F2</b> &lt;flags:U16&gt;
+<hr>OPEN <i>a</i>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;FOR [INPUT|OUTPUT|RANDOM|APPEND|BINARY]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[ACCESS (READ|WRITE|READ WRITE)]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[(SHARED|LOCK (READ|WRITE|READ WRITE))]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;AS <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00C9</b> &lt;flags:U16&gt;
+<hr>OPEN <i>a</i>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;FOR [INPUT|OUTPUT|RANDOM|APPEND|BINARY]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[ACCESS (READ|WRITE|READ WRITE)]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[(SHARED|LOCK (READ|WRITE|READ WRITE))]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;AS <i>b</i></td>
+<td rowspan='2' class='description'>The <i>flags</i> field specifies the mode options. Known flags are:
+<br><table border='1'>
+<tr>
+<td>0001</td>
+<td>FOR INPUT</td>
+</tr>
+<tr>
+<td>0002</td>
+<td>FOR OUTPUT</td>
+</tr>
+<tr>
+<td>0004</td>
+<td>FOR RANDOM</td>
+</tr>
+<tr>
+<td>0008</td>
+<td>FOR APPEND</td>
+</tr>
+<tr>
+<td>0020</td>
+<td>FOR BINARY</td>
+</tr>
+<tr>
+<td>0100</td>
+<td>ACCESS READ</td>
+</tr>
+<tr>
+<td>0200</td>
+<td>ACCESS WRITE</td>
+</tr>
+<tr>
+<td>0300</td>
+<td>ACCESS READ WRITE</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>LOCK READ WRITE</td>
+</tr>
+<tr>
+<td>2000</td>
+<td>LOCK WRITE</td>
+</tr>
+<tr>
+<td>3000</td>
+<td>LOCK READ</td>
+</tr>
+<tr>
+<td>4000</td>
+<td>SHARED</td>
+</tr>
+</table>
+</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>00F3</b> &lt;flags:U16&gt;
+<hr>OPEN <i>a</i>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;FOR [INPUT|OUTPUT|RANDOM|APPEND|BINARY]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[ACCESS (READ|WRITE|READ WRITE)]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[(SHARED|LOCK (READ|WRITE|READ WRITE))]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;AS <i>b</i>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;LEN = <i>c</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>00CA</b> &lt;flags:U16&gt;
+<hr>OPEN <i>a</i>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;FOR [INPUT|OUTPUT|RANDOM|APPEND|BINARY]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[ACCESS (READ|WRITE|READ WRITE)]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[(SHARED|LOCK (READ|WRITE|READ WRITE))]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;AS <i>b</i>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;LEN = <i>c</i></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>00F4</b>
+<hr>OPEN <i>a</i>, <i>b</i>, <i>c</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>00CB</b>
+<hr>OPEN <i>a</i>, <i>b</i>, <i>c</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; <b>00F5</b>
+<hr>OPEN <i>a</i>, <i>b</i>, <i>c</i>, <i>d</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; <b>00CC</b>
+<hr>OPEN <i>a</i>, <i>b</i>, <i>c</i>, <i>d</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>00F6</b>
+<hr>OPTION BASE 0</td>
+<td colspan='4'><b>00CD</b>
+<hr>OPTION BASE 0</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>00F7</b>
+<hr>OPTION BASE 1</td>
+<td colspan='4'><b>00CE</b>
+<hr>OPTION BASE 1</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00F8</b>
+<hr>OUT <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00CF</b>
+<hr>OUT <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; (&lt;b&gt; OR 01A9) (&lt;c&gt; OR 01A9) <b>00F9</b>
+<hr>PAINT <i>a</i><sup>[STEP] (x, y)</sup>, [<i>b</i>], [<i>c</i>]</td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; (&lt;b&gt; OR 0173) (&lt;c&gt; OR 0173) <b>00D0</b>
+<hr>PAINT <i>a</i><sup>[STEP] (x, y)</sup>, [<i>b</i>], [<i>c</i>]</td>
+<td class='description'>Note that <tt>01A9/0173</tt> is only required if <i>b</i> is missing but <i>c</i> is present.</td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; (&lt;b&gt; OR 01A9) (&lt;c&gt; OR 01A9) &lt;d&gt; <b>00FA</b>
+<hr>PAINT <i>a</i><sup>[STEP] (x, y)</sup>, [<i>b</i>], [<i>c</i>], <i>d</i></td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; (&lt;b&gt; OR 0173) (&lt;c&gt; OR 0173) &lt;d&gt; <b>00D1</b>
+<hr>PAINT <i>a</i><sup>[STEP] (x, y)</sup>, [<i>b</i>], [<i>c</i>], <i>d</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>00FB</b>
+<hr>PALETTE</td>
+<td colspan='4'><b>00D2</b>
+<hr>PALETTE</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00FC</b>
+<hr>PALETTE <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00D3</b>
+<hr>PALETTE <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>0029-002E</sup>&gt; <b>00FD</b>
+<hr>PALETTE USING <i>a</i></td>
+<td colspan='4'>&lt;a<sup>000E</sup>&gt; <b>00D4</b>
+<hr>PALETTE USING <i>a</i></td>
+<td class='description'>Note: QuickBASIC 4.0 uses a different encoding for the arrays than later versions</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>00FE</b>
+<hr>PCOPY <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00D5</b>
+<hr>PCOPY <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>00FF</b>
+<hr>PLAY <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00D6</b>
+<hr>PLAY <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0100</b>
+<hr>POKE <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00D7</b>
+<hr>POKE <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; <b>0101</b>
+<hr>PRESET <i>a</i><sup>[STEP] (x, y)</sup></td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; <b>00D8</b>
+<hr>PRESET <i>a</i><sup>[STEP] (x, y)</sup></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; &lt;b&gt; <b>0102</b>
+<hr>PRESET <i>a</i><sup>[STEP] (x, y)</sup>, <i>b</i></td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; &lt;b&gt; <b>00D9</b>
+<hr>PRESET <i>a</i><sup>[STEP] (x, y)</sup>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; <b>0103</b>
+<hr>PSET <i>a</i><sup>[STEP] (x, y)</sup></td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; <b>00DA</b>
+<hr>PSET <i>a</i><sup>[STEP] (x, y)</sup></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>00AA, 00AB</sup>&gt; &lt;b&gt; <b>0104</b>
+<hr>PSET <i>a</i><sup>[STEP] (x, y)</sup>, <i>b</i></td>
+<td colspan='4'>&lt;a<sup>0081, 0082</sup>&gt; &lt;b&gt; <b>00DB</b>
+<hr>PSET <i>a</i><sup>[STEP] (x, y)</sup>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0105</b>
+<hr>PUT <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00DC</b>
+<hr>PUT <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0106</b>
+<hr>PUT <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00DD</b>
+<hr>PUT <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;c&gt; <b>0107</b> ????
+<hr>PUT <i>a</i>, , <i>c</i></td>
+<td colspan='4'>&lt;a&gt; &lt;c&gt; <b>00DE</b> ????
+<hr>PUT <i>a</i>, , <i>c</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>0108</b> ????
+<hr>PUT <i>a</i>, <i>b</i>, <i>c</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>00DF</b> ????
+<hr>PUT <i>a</i>, <i>b</i>, <i>c</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0109</b>
+<hr>RANDOMIZE</td>
+<td colspan='4'><b>00E0</b>
+<hr>RANDOMIZE</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>010A</b>
+<hr>RANDOMIZE <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00E1</b>
+<hr>RANDOMIZE <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>010B</b>
+<hr>READ <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00E2</b>
+<hr>READ <i>a</i></td>
+<td class='description'>Each argument in a <tt>READ</tt> statement gets its own entry</td>
+</tr>
+
+<tr>
+<td><b>010C</b> &lt;text:STR&gt;
+<hr>REM <i>text</i></td>
+<td colspan='4'><b>00E3</b> &lt;text:STR&gt;
+<hr>REM <i>text</i></td>
+<td class='description'>Characters appearing more than 3 times are compactified: <tt>0D &lt;count:U8&gt; &lt;char:U8&gt;</tt>.</td>
+</tr>
+
+<tr>
+<td><b>010D</b>
+<hr>RESET</td>
+<td colspan='4'><b>00E4</b>
+<hr>RESET</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>010E</b>
+<hr>RMDIR <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00E5</b>
+<hr>RMDIR <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>010F</b>
+<hr>RSET <i>a</i> = <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00E6</b>
+<hr>RSET <i>a</i> = <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>{01A9 &lt;a&gt; OR 01A8}<sup>N</sup> <b>0110</b> &lt;N<sup>*</sup>&gt;
+<br>SCREEN [<i>a</i><sub>1</sub>], &hellip;, [<i>a</i><sub><i>N</i></sub>]</td>
+<td colspan='4'>{0173 &lt;a&gt; OR 0172}<sup>N</sup> <b>00E7</b> &lt;N<sup>*</sup>&gt;
+<br>SCREEN [<i>a</i><sub>1</sub>], &hellip;, [<i>a</i><sub><i>N</i></sub>]</td>
+<td class='description'>The parameter <tt>N<sup>*</sup></tt> is the sum of the number of argument positions and the number of arguments actually present.
+<br>If all positions are present, it is equal to 2 * <i>N</i>.</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0111</b>
+<hr>SEEK <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00E8</b>
+<hr>SEEK <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0112</b>
+<hr>SHELL</td>
+<td colspan='4'><b>00E9</b>
+<hr>SHELL</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0113</b>
+<hr>SHELL <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00EA</b>
+<hr>SHELL <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0114</b>
+<hr>SLEEP</td>
+<td colspan='4'><b>00EB</b>
+<hr>SLEEP</td>
+<td class='description'>See also <tt>017B</tt></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0115</b>
+<hr>SOUND <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00EC</b>
+<hr>SOUND <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0116</b> ????
+<hr>SWAP <i>a</i>, <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00ED</b> ????
+<hr>SWAP <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0117</b>
+<hr>SYSTEM</td>
+<td colspan='4'><b>00EE</b>
+<hr>SYSTEM</td>
+<td class='description'>See also <tt>01A5</tt></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0118</b>
+<hr>TIME$ = <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00EF</b>
+<hr>TIME$ = <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0119</b>
+<hr>TROFF</td>
+<td colspan='4'><b>00F0</b>
+<hr>TROFF</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>011A</b>
+<hr>TRON</td>
+<td colspan='4'><b>00F1</b>
+<hr>TRON</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; [(&lt;b&gt; OR &lt;1<sup>0191</sup>&gt;) [&lt;c&gt;]] <b>011B</b> &lt;flags:U16&gt;
+<hr>UNLOCK <i>a</i>[, (<i>b</i> | [<i>b</i>] TO <i>c</i>)]</td>
+<td colspan='4'>&lt;a&gt; [(&lt;b&gt; OR &lt;1<sup><span class='parametrized'>05</span>64</sup>&gt;) [&lt;c&gt;]] <b>00F2</b> &lt;flags:U16&gt;
+<hr>UNLOCK <i>a</i>[, (<i>b</i> | [<i>b</i>] TO <i>c</i>)]</td>
+<td class='description'>The <i>flags</i> parameter determines the format of the UNLOCK function.
+<br>
+<table border='1'>
+<tr>
+<td>0001</td>
+<td>UNLOCK <i>a</i></td>
+</tr>
+<tr>
+<td>0003</td>
+<td>UNLOCK <i>a</i>, <i>b</i> TO <i>c</i></td>
+</tr>
+<tr>
+<td>4003</td>
+<td>UNLOCK <i>a</i>, TO <i>c</i> <span class='description'>(Note that a single token for 1 is present)</span></td>
+</tr>
+<tr>
+<td>8003</td>
+<td>UNLOCK <i>a</i>, <i>b</i></td>
+</tr>
+</table>
+</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; (&lt;e&gt; OR 01A9) (&lt;f&gt; OR 01A9) <b>011C</b>
+<hr>VIEW (<i>a</i>, <i>b</i>)-(<i>c</i>, <i>d</i>), [<i>e</i>], [<i>f</i>]</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; (&lt;e&gt; OR 0173) (&lt;f&gt; OR 0173) <b>00F3</b>
+<hr>VIEW (<i>a</i>, <i>b</i>)-(<i>c</i>, <i>d</i>), [<i>e</i>], [<i>f</i>]</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>011D</b>
+<hr>VIEW</td>
+<td colspan='4'><b>00F4</b>
+<hr>VIEW</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>011E</b>
+<hr>VIEW PRINT</td>
+<td colspan='4'><b>00F5</b>
+<hr>VIEW PRINT</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>011F</b>
+<hr>VIEW PRINT <i>a</i> TO <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>00F6</b>
+<hr>VIEW PRINT <i>a</i> TO <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; (&lt;e&gt; OR 01A9) (&lt;f&gt; OR 01A9) <b>0120</b>
+<hr>VIEW SCREEN (<i>a</i>, <i>b</i>)-(<i>c</i>, <i>d</i>), [<i>e</i>], [<i>f</i>]</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; (&lt;e&gt; OR 0173) (&lt;f&gt; OR 0173) <b>00F7</b>
+<hr>VIEW SCREEN (<i>a</i>, <i>b</i>)-(<i>c</i>, <i>d</i>), [<i>e</i>], [<i>f</i>]</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>(&lt;a&gt; OR 01A9) (&lt;b&gt; OR 01A9) <b>0121</b>
+<hr>WIDTH [<i>a</i>], [<i>b</i>]</td>
+<td colspan='4'>(&lt;a&gt; OR 0173) (&lt;b&gt; OR 0173) <b>00F8</b>
+<hr>WIDTH [<i>a</i>], [<i>b</i>]</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0122</b>
+<hr>WIDTH LPRINT <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>00F9</b>
+<hr>WIDTH LPRINT <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;#filenum&gt; &lt;a&gt; <b>0123</b>
+<hr>WIDTH <i>#filenum</i>, <i>a</i></td>
+<td colspan='4'>&lt;#filenum&gt; &lt;a&gt; <b>00FA</b>
+<hr>WIDTH <i>#filenum</i>, <i>a</i></td>
+<td class='description'><i>#filenum</i> is an expression that encodes a file number with the # symbol, to avoid syntactical ambiguity</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; <b>0124</b>
+<hr>WINDOW (<i>a</i>, <i>b</i>)-(<i>c</i>, <i>d</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; <b>00FB</b>
+<hr>WINDOW (<i>a</i>, <i>b</i>)-(<i>c</i>, <i>d</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0125</b>
+<hr>WINDOW</td>
+<td colspan='4'><b>00FC</b>
+<hr>WINDOW</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; <b>0126</b>
+<hr>WINDOW SCREEN (<i>a</i>, <i>b</i>)-(<i>c</i>, <i>d</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; <b>00FD</b>
+<hr>WINDOW SCREEN (<i>a</i>, <i>b</i>)-(<i>c</i>, <i>d</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0127</b> {&lt;item<sup>00B8, 00B9, 00BA, 00BB, 00BD, 00BE</sup>&gt;} &lt;item<sup>00BC, 00BF</sup>&gt;
+<hr>WRITE &lt;item&gt;<sub>1</supb> &hellip;</td>
+<td colspan='4'><b>00FE</b> {&lt;item<sup>008F, 0090, 0091, 0092, 0094, 0095</sup>&gt;} &lt;item<sup>0093, 0096</sup>&gt;
+<hr>WRITE &lt;item&gt;<sub>1</supb> &hellip;</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0128</b>
+<hr>USING &lt;a&gt;</td>
+<td colspan='4'>&lt;a&gt; <b>00FF</b>
+<hr>USING &lt;a&gt;</td>
+<td class='description'>Appears in <tt>LPRINT</tt> statement, or as the first opcode in a <tt>PRINT USING</tt> statement.</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0129</b>
+<hr>(E) <i>a</i> + <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0100</b>
+<hr>(E) <i>a</i> + <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>012A</b>
+<hr>(E) <i>a</i> AND <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0101</b>
+<hr>(E) <i>a</i> AND <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>012B</b>
+<hr>(E) <i>a</i> / <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0102</b>
+<hr>(E) <i>a</i> / <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>012C</b>
+<hr>(E) <i>a</i> = <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0103</b>
+<hr>(E) <i>a</i> = <i>b</i></td>
+<td class='description'>Equality operator</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>012D</b>
+<hr>(E) <i>a</i> EQV <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0104</b>
+<hr>(E) <i>a</i> EQV <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>012E</b>
+<hr>(E) ABS(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0105</b>
+<hr>(E) ABS(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>012F</b>
+<hr>(E) ASC(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0106</b>
+<hr>(E) ASC(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0130</b>
+<hr>(E) ATN(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0107</b>
+<hr>(E) ATN(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td class='undefined'></td>
+<td colspan='4'>&lt;a&gt; <b><span class='parametrized'>01</span>08</b>
+<hr>(E) C<span class='parametrized'><i>type</i></span>(<i>a</i>)</td>
+<td class='description'>The parameter determines the function
+<br>1 is <tt>CINT</tt>
+<br>2 is <tt>CLNG</tt>
+<br>3 is <tt>CSNG</tt>
+<br>4 is <tt>CDBL</tt>
+<br>5 is <tt>CCUR</tt> (only QuickBASIC 7.0 and later)</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0131</b>
+<hr>(E) CDBL(<i>a</i>)</td>
+<td colspan='4' class='undefined'>&lt;a&gt; <b>1108</b>
+<hr>(E) CDBL(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0132</b>
+<hr>(E) CHR$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0109</b>
+<hr>(E) CHR$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0133</b>
+<hr>(E) CINT(<i>a</i>)</td>
+<td colspan='4' class='undefined'>&lt;a&gt; <b>0508</b>
+<hr>(E) CINT(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0134</b>
+<hr>(E) CLNG(<i>a</i>)</td>
+<td colspan='4' class='undefined'>&lt;a&gt; <b>0908</b>
+<hr>(E) CLNG(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0135</b>
+<hr>(E) COMMAND$</td>
+<td colspan='4'><b>010A</b>
+<hr>(E) COMMAND$</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0136</b>
+<hr>(E) COS(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>010B</b>
+<hr>(E) COS(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0137</b>
+<hr>(E) CSNG(<i>a</i>)</td>
+<td colspan='4' class='undefined'>&lt;a&gt; <b>0D08</b>
+<hr>(E) CSNG(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0138</b>
+<hr>(E) CSRLIN</td>
+<td colspan='4'><b>010C</b>
+<hr>(E) CSRLIN</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0139</b>
+<hr>(E) CVD(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>010D</b>
+<hr>(E) CVD(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>013A</b>
+<hr>(E) CVDMBF(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>010E</b>
+<hr>(E) CVDMBF(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>013B</b>
+<hr>(E) CVI(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>010F</b>
+<hr>(E) CVI(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>013C</b>
+<hr>(E) CVL(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0110</b>
+<hr>(E) CVL(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>013D</b>
+<hr>(E) CVS(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0111</b>
+<hr>(E) CVS(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>013E</b>
+<hr>(E) CVSMBF(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0112</b>
+<hr>(E) CVSMBF(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>013F</b>
+<hr>(E) DATE$</td>
+<td colspan='4'><b>0113</b>
+<hr>(E) DATE$</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0140</b>
+<hr>(E) ENVIRON$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0114</b>
+<hr>(E) ENVIRON$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0141</b>
+<hr>(E) EOF(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0115</b>
+<hr>(E) EOF(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0142</b>
+<hr>(E) ERDEV</td>
+<td colspan='4'><b>0116</b>
+<hr>(E) ERDEV</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0143</b>
+<hr>(E) ERDEV$</td>
+<td colspan='4'><b>0117</b>
+<hr>(E) ERDEV$</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0144</b>
+<hr>(E) ERL</td>
+<td colspan='4'><b>0118</b>
+<hr>(E) ERL</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0145</b>
+<hr>(E) ERR</td>
+<td colspan='4'><b>0119</b>
+<hr>(E) ERR</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0146</b>
+<hr>(E) EXP(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>011A</b>
+<hr>(E) EXP(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0147</b>
+<hr>(E) FILEATTR(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>011B</b>
+<hr>(E) FILEATTR(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0148</b>
+<hr>(E) FIX(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>011C</b>
+<hr>(E) FIX(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0149</b>
+<hr>(E) FRE(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>011D</b>
+<hr>(E) FRE(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>014A</b>
+<hr>(E) FREEFILE</td>
+<td colspan='4'><b>011E</b>
+<hr>(E) FREEFILE</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>014B</b>
+<hr>(E) HEX$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>011F</b>
+<hr>(E) HEX$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>014C</b>
+<hr>(E) INKEY$</td>
+<td colspan='4'><b>0120</b>
+<hr>(E) INKEY$</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>014D</b>
+<hr>(E) INP(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0121</b>
+<hr>(E) INP(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>014E</b>
+<hr>(E) INPUT$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0122</b>
+<hr>(E) INPUT$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>014F</b>
+<hr>(E) INPUT$(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0123</b>
+<hr>(E) INPUT$(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0150</b>
+<hr>(E) INSTR(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0124</b>
+<hr>(E) INSTR(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>0151</b>
+<hr>(E) INSTR(<i>a</i>, <i>b</i>, <i>c</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>0125</b>
+<hr>(E) INSTR(<i>a</i>, <i>b</i>, <i>c</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0152</b>
+<hr>(E) INT(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0126</b>
+<hr>(E) INT(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0153</b>
+<hr>(E) IOCTL$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0127</b>
+<hr>(E) IOCTL$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>0029-002E</sup>&gt; <b>0154</b>
+<hr>(E) LBOUND(<i>a</i>)</td>
+<td colspan='4'>&lt;a<sup>000E</sup>&gt; <b>0128</b>
+<hr>(E) LBOUND(<i>a</i>)</td>
+<td rowspan='2' class='description'>Note: QuickBASIC 4.0 uses a different encoding for the array than later versions</td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>0029-002E</sup>&gt; &lt;b&gt; <b>0155</b>
+<hr>(E) LBOUND(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a<sup>000E</sup>&gt; &lt;b&gt; <b>0129</b>
+<hr>(E) LBOUND(<i>a</i>, <i>b</i>)</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0156</b>
+<hr>(E) LCASE$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>012A</b>
+<hr>(E) LCASE$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0157</b>
+<hr>(E) LTRIM$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>012B</b>
+<hr>(E) LTRIM$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0158</b>
+<hr>(E) LEFT$(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>012C</b>
+<hr>(E) LEFT$(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0159</b> ????
+<hr>(E) LEN(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>012D</b> ????
+<hr>(E) LEN(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>015A</b>
+<hr>(E) LOC(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>012E</b>
+<hr>(E) LOC(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>015B</b>
+<hr>(E) LOF(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>012F</b>
+<hr>(E) LOF(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>015C</b>
+<hr>(E) LOG(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0130</b>
+<hr>(E) LOG(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>015D</b>
+<hr>(E) LPOS(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0131</b>
+<hr>(E) LPOS(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>015E</b>
+<hr>(E) MID$(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0132</b>
+<hr>(E) MID$(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>015F</b>
+<hr>(E) MID$(<i>a</i>, <i>b</i>, <i>c</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>0133</b>
+<hr>(E) MID$(<i>a</i>, <i>b</i>, <i>c</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0160</b>
+<hr>(E) MKD$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0134</b>
+<hr>(E) MKD$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0161</b>
+<hr>(E) MKDMBF$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0135</b>
+<hr>(E) MKDMBF$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0162</b>
+<hr>(E) MKI$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0136</b>
+<hr>(E) MKI$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0163</b>
+<hr>(E) MKL$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0137</b>
+<hr>(E) MKL$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0164</b>
+<hr>(E) MKS$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0138</b>
+<hr>(E) MKS$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0165</b>
+<hr>(E) MKSMBF$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0139</b>
+<hr>(E) MKSMBF$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0166</b>
+<hr>(E) OCT$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>013A</b>
+<hr>(E) OCT$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0167</b>
+<hr>(E) PEEK(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>013B</b>
+<hr>(E) PEEK(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0168</b>
+<hr>(E) PEN(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>013C</b>
+<hr>(E) PEN(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0169</b>
+<hr>(E) PLAY(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>013D</b>
+<hr>(E) PLAY(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>016A</b>
+<hr>(E) PMAP(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>013E</b>
+<hr>(E) PMAP(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>016B</b>
+<hr>(E) POINT(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>013F</b>
+<hr>(E) POINT(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>016C</b>
+<hr>(E) POINT(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0140</b>
+<hr>(E) POINT(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>016D</b>
+<hr>(E) POS(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0141</b>
+<hr>(E) POS(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>016E</b>
+<hr>(E) RIGHT$(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0142</b>
+<hr>(E) RIGHT$(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>016F</b>
+<hr>(E) RND</td>
+<td colspan='4'><b>0143</b>
+<hr>(E) RND</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0170</b>
+<hr>(E) RND(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0144</b>
+<hr>(E) RND(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0171</b>
+<hr>(E) RTRIM$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0145</b>
+<hr>(E) RTRIM$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0172</b>
+<hr>(E) SADD(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0146</b>
+<hr>(E) SADD(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>0173</b>
+<hr>(E) SCREEN(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0147</b>
+<hr>(E) SCREEN(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>0174</b>
+<hr>(E) SCREEN(<i>a</i>, <i>b</i>, <i>c</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>0148</b>
+<hr>(E) SCREEN(<i>a</i>, <i>b</i>, <i>c</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0175</b>
+<hr>(E) SEEK(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0149</b>
+<hr>(E) SEEK(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0176</b>
+<hr>(E) SETMEM(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>014A</b>
+<hr>(E) SETMEM(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0177</b>
+<hr>(E) SGN(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>014B</b>
+<hr>(E) SGN(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0178</b>
+<hr>(E) SHELL(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>014C</b>
+<hr>(E) SHELL(<i>a</i>)</td>
+<td class='description'>Note: QuickBASIC 4.0/4.5 does not support this function, but it recognizes it in the opcode stream.</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0179</b>
+<hr>(E) SIN(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>014D</b>
+<hr>(E) SIN(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>017A</b>
+<hr>(E) SPACE$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>014E</b>
+<hr>(E) SPACE$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>017B</b>
+<hr>(E) SQR(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>014F</b>
+<hr>(E) SQR(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>017C</b>
+<hr>(E) STICK(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0150</b>
+<hr>(E) STICK(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>017D</b>
+<hr>(E) STR$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0151</b>
+<hr>(E) STR$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>017E</b>
+<hr>(E) STRIG(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0152</b>
+<hr>(E) STRIG(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>017F</b>
+<hr>(E) STRING$(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0153</b>
+<hr>(E) STRING$(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0180</b>
+<hr>(E) TAN(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0154</b>
+<hr>(E) TAN(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0181</b>
+<hr>(E) TIME$</td>
+<td colspan='4'><b>0155</b>
+<hr>(E) TIME$</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0182</b>
+<hr>(E) TIMER</td>
+<td colspan='4'><b>0156</b>
+<hr>(E) TIMER</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>0029-002E</sup>&gt; <b>0183</b>
+<hr>(E) UBOUND(<i>a</i>)</td>
+<td colspan='4'>&lt;a<sup>000E</sup>&gt; <b>0157</b>
+<hr>(E) UBOUND(<i>a</i>)</td>
+<td rowspan='2' class='description'>Note: QuickBASIC 4.0 uses a different encoding for the array than later versions</td>
+</tr>
+
+<tr>
+<td>&lt;a<sup>0029-002E</sup>&gt; &lt;b&gt; <b>0184</b>
+<hr>(E) UBOUND(<i>a</i>, <i>b</i>)</td>
+<td colspan='4'>&lt;a<sup>000E</sup>&gt; &lt;b&gt; <b>0158</b>
+<hr>(E) UBOUND(<i>a</i>, <i>b</i>)</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0185</b>
+<hr>(E) UCASE$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>0159</b>
+<hr>(E) UCASE$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0186</b>
+<hr>(E) VAL(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>015A</b>
+<hr>(E) VAL(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0187</b>
+<hr>(E) VARPTR(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>015B</b>
+<hr>(E) VARPTR(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0188</b> ????
+<hr>(E) VARPTR$(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>015C</b> ????
+<hr>(E) VARPTR$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>0189</b>
+<hr>(E) VARSEG(<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>015D</b>
+<hr>(E) VARSEG(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>018A</b>
+<hr>(E) <i>a</i> &gt;= <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>015E</b>
+<hr>(E) <i>a</i> &gt;= <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>018B</b>
+<hr>(E) <i>a</i> &gt; <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>015F</b>
+<hr>(E) <i>a</i> &gt; <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>018C</b>
+<hr>(E) <i>a</i> \ <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0160</b>
+<hr>(E) <i>a</i> \ <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>018D</b>
+<hr>(E) <i>a</i> IMP <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0161</b>
+<hr>(E) <i>a</i> IMP <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>018E</b>
+<hr>(E) <i>a</i> &lt;= <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0162</b>
+<hr>(E) <i>a</i> &lt;= <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>018F</b>
+<hr>(E) <i>a</i> &lt; <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0163</b>
+<hr>(E) <i>a</i> &lt; <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>0190</b>
+<br><b>0191</b>
+<br><b>0192</b>
+<br><b>0193</b>
+<br><b>0194</b>
+<br><b>0195</b>
+<br><b>0196</b>
+<br><b>0197</b>
+<br><b>0198</b>
+<br><b>0199</b>
+<br><b>019A</b></td>
+<td colspan='4'><b><span class='parametrized'>01</span>64</b></td>
+<td class='description'>Represents the decimal integers 0 to 10.
+<br>In QuickBASIC 4.5 and later, the integer value is encoded as a parameter.</td>
+</tr>
+
+<tr>
+<td><b>019B</b> &lt;value:U16&gt;
+<hr><i>value</i></td>
+<td colspan='4'><b>0165</b> &lt;value:U16&gt;
+<hr><i>value</i></td>
+<td class='description'>A (16-bit) decimal integer.</td>
+</tr>
+
+<tr>
+<td><b>019C</b> &lt;value:U32&gt;
+<hr><i>value</i>&amp;</td>
+<td colspan='4'><b>0166</b> &lt;value:U32&gt;
+<hr><i>value</i>&amp;</td>
+<td class='description'>A long (32-bit) decimal integer.</td>
+</tr>
+
+<tr>
+<td><b>019D</b> &lt;value:U16&gt;
+<hr>&amp;H<i>value</i></td>
+<td colspan='4'><b>0167</b> &lt;value:U16&gt;
+<hr>&amp;H<i>value</i></td>
+<td class='description'>A (16-bit) hexadecimal (base 16) integer.</td>
+</tr>
+
+<tr>
+<td><b>019E</b> &lt;value:U32&gt;
+<hr>&amp;H<i>value</i>&amp;</td>
+<td colspan='4'><b>0168</b> &lt;value:U32&gt;
+<hr>&amp;H<i>value</i>&amp;</td>
+<td class='description'>A long (32-bit) hexadecimal (base 16) integer.</td>
+</tr>
+
+<tr>
+<td><b>019F</b> &lt;value:U16&gt;
+<hr>&amp;O<i>value</i></td>
+<td colspan='4'><b>0169</b> &lt;value:U16&gt;
+<hr>&amp;O<i>value</i></td>
+<td class='description'>A (16-bit) octal (base 8) integer.</td>
+</tr>
+
+<tr>
+<td><b>01A0</b> &lt;value:U32&gt;
+<hr>&amp;O<i>value</i>&amp;</td>
+<td colspan='4'><b>016A</b> &lt;value:U32&gt;
+<hr>&amp;O<i>value</i>&amp;</td>
+<td class='description'>A long (32-bit) octal (base 8) integer.</td>
+</tr>
+
+<tr>
+<td><b>01A1</b> &lt;value:F32&gt;
+<hr><i>value</i>!</td>
+<td colspan='4'><b>016B</b> &lt;value:F32&gt;
+<hr><i>value</i>!</td>
+<td class='description'>An IEEE single precision (32-bit) floating point literal.</td>
+</tr>
+
+<tr>
+<td><b>01A2</b> &lt;value:F64&gt;
+<hr><i>value</i>#</td>
+<td colspan='4'><b>016C</b> &lt;value:F64&gt;
+<hr><i>value</i>#</td>
+<td class='description'>An IEEE double precision (32-bit) floating point literal.</td>
+</tr>
+
+<tr>
+<td><b>01A3</b> &lt;string:STR&gt;
+<hr>"<i>string</i>"</td>
+<td colspan='4'><b>016D</b> &lt;value:F32&gt;
+<hr>"<i>string</i>"</td>
+<td class='description'>A string literal.
+<br>If a padding character is required, it seems to be a <tt>"</tt> character.</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>01A4</b>
+<hr>(E) (<i>a</i>)</td>
+<td colspan='4'>&lt;a&gt; <b>016E</b>
+<hr>(E) (<i>a</i>)</td>
+<td class='description'>Parenthesized expression</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>01A5</b>
+<hr>(E) <i>a</i> MOD <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>016F</b>
+<hr>(E) <i>a</i> MOD <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>01A6</b>
+<hr>(E) <i>a</i> * <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0170</b>
+<hr>(E) <i>a</i> * <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>01A7</b>
+<hr>(E) <i>a</i> &lt;&gt; <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0171</b>
+<hr>(E) <i>a</i> &lt;&gt; <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td><b>01A8</b></td>
+<td colspan='4'><b>0172</b></td>
+<td class='description'>Denotes an absent parameter.<br>
+Appears in <tt>CIRCLE</tt>, <tt>CLEAR</tt>, <tt>LOCATE</tt>, <tt>SCREEN</tt></td>
+</tr>
+
+<tr>
+<td><b>01A9</b></td>
+<td colspan='4'><b>0173</b></td>
+<td class='description'>Denotes an absent parameter, or prefixed to a parameter that is present.
+<br>In either case, when a parameter count is present, this opcode is counted as a single parameter on its own.
+<br>Appears as an absent parameter in <tt>CLS</tt>, <tt>PAINT</tt>, <tt>VIEW</tt>, <tt>WIDTH</tt>.
+<br>Appears as a prefix in <tt>CLEAR</tt>, <tt>COLOR</tt>, <tt>LOCATE</tt>, <tt>SCREEN</tt>.</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>01AA</b>
+<hr>(E) NOT <i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0174</b>
+<hr>(E) NOT <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>01AB</b>
+<hr>(E) <i>a</i> OR <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0175</b>
+<hr>(E) <i>a</i> OR <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>01AC</b>
+<hr>(E) <i>a</i> ^ <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0176</b>
+<hr>(E) <i>a</i> ^ <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>01AD</b>
+<hr>(E) <i>a</i> - <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0177</b>
+<hr>(E) <i>a</i> - <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; <b>01AE</b>
+<hr>(E) -<i>a</i></td>
+<td colspan='4'>&lt;a&gt; <b>0178</b>
+<hr>(E) -<i>a</i></td>
+<td class='description'>Unary minus</td>
+</tr>
+
+<tr>
+<td>&lt;a&gt; &lt;b&gt; <b>01AF</b>
+<hr>(E) <i>a</i> XOR <i>b</i></td>
+<td colspan='4'>&lt;a&gt; &lt;b&gt; <b>0179</b>
+<hr>(E) <i>a</i> XOR <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td class='undefined'></td>
+<td colspan='4'><b>017A</b>
+<hr>UEVENT</td>
+<td class='description'>May appear in <tt>ON GOSUB</tt> statements or as part of an <tt>OFF/ON/STOP</tt> statement</td>
+</tr>
+
+<tr>
+<td class='undefined'></td>
+<td colspan='4'>&lt;a&gt; <b>017B</b>
+<hr>SLEEP <i>a</i></td>
+<td class='description'>See also <tt>00EB</tt></td>
+</tr>
+
+<tr>
+<td class='undefined'></td>
+<td colspan='4'><b>017C</b> ???? &lt;N:U16&gt; &lt;column:U16&gt;
+<hr>STRING * <i>N</i></td>
+<td class='description'>Appears in a <tt>COMMON</tt>, <tt>DIM</tt>, <tt>REDIM</tt>, <tt>SHARED</tt>, <tt>STATIC</tt>, <tt>TYPE</tt> declaration.
+<br>The <tt>AS</tt> keyword appears in <i>column</i> (0 based).</td>
+</tr>
+
+<tr>
+<td class='undefined'></td>
+<td colspan='4'>[001A IF SHARED] <b>017D</b> ???? {&lt;decl<sup>000D, 0010</sup>&gt;}
+<hr>DIM [SHARED] <i>decl</i><sub>1</sub>, &hellip;</td>
+<td class='description'>Note: QuickBASIC 4.0 does not use a prefixing opcode for <tt>DIM</tt> statement, instead the opcodes <tt>0042</tt>, <tt>0044</tt> are used</td>
+</tr>
+
+<tr>
+<td class='undefined' colspan='2'></td>
+<td colspan='3'>{(&lt;a&gt; OR 0018) &lt;b&gt;}<sup>N</sup> <b>017E</b> &lt;2 * N:U16&gt; &lt;name:IDN&gt; &lt;type<sup>0015, 0016, 017C</sup>&gt;
+<hr><i>name</i>([<i>a</i><sub>1</sub> TO] <i>b</i><sub>1</sub>, &hellip;, [<i>a</i><sub><i>N</i></sub> TO] <i>b</i><sub><i>N</i></sub>) AS <i>type</i></td>
+<td class='description'>Appears in a <tt>TYPE</tt> declaration.</td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>017F</b>
+<hr>CHDRIVE <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>0180</b>
+<hr>ERR = <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>0181</b>
+<hr>(E) CURDIR$</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>0182</b>
+<hr>(E) CURDIR$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>0183</b>
+<hr>(E) DIR$</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>0184</b>
+<hr>(E) DIR$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>0185</b> &lt;value:U64&gt;
+<hr><i>value</i>@</td>
+<td class='description'>A currency literal, stored as the unscaled 64-bit integer.</td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>0186</b>
+<hr>(E) BOF(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>0187</b>
+<hr>(E) CVC(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>0188</b>
+<hr>(E) GETINDEX$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>0189</b>
+<hr>(E) MKC$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>018A</b>
+<hr>(E) SAVEPOINT</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>018B</b>
+<hr>(E) SSEG(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>018C</b>
+<hr>(E) SSEGADD(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>018D</b>
+<hr>(E) STACK</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>018E</b>
+<hr>BEGINTRANS</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>018F</b>
+<hr>CHECKPOINT</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>0190</b>
+<hr>COMMITTRANS</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>{&lt;a&gt;}<sup>N</sup> <b>0191</b> &lt;N:U16&gt;
+<hr>CREATEINDEX &lt;a&gt;<sub>1</sub>, &hellip;, &lt;a&gt;<sub><i>N</i></sub></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>0192</b>
+<hr>DELETE <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; &lt;b&gt; <b>0193</b>
+<hr>DELETEINDEX <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; &lt;b&gt; <b>0194</b>
+<hr>DELETETABLE <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>0195</b>
+<hr>END <i>a</i></td>
+<td class='description'>See also <tt>004E</tt></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b><span class='parametrized'>01</span>96</b>
+<hr>EVENT (OFF|ON)</td>
+<td class='description'>The parameter is 0 for <tt>OFF</tt> and 1 for <tt>ON</tt></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; &lt;b&gt; <b>0197</b>
+<hr>INSERT <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>0198</b>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;(0000 IF MOVEFIRST
+<br>&nbsp;&nbsp;&nbsp;&nbsp;ELSE 0004 IF MOVELAST
+<br>&nbsp;&nbsp;&nbsp;&nbsp;ELSE 0008 IF MOVENEXT
+<br>&nbsp;&nbsp;&nbsp;&nbsp;ELSE 000C IF MOVEPREVIOUS)
+<hr>MOVEFIRST <i>a</i>
+<br>MOVELAST <i>a</i>
+<br>MOVENEXT <i>a</i>
+<br>MOVEPREVIOUS <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>0199</b> &lt;label:IDN&gt;
+<hr>ON LOCAL ERROR GOTO <i>label</i>
+<hr><b>0199</b> FFFF
+<hr>ON LOCAL ERROR GOTO 0
+<hr><b>0199</b> FFFE
+<hr>ON LOCAL ERROR RESUME NEXT</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>019A</b> ???? &lt;type:IDN&gt;
+<hr>OPEN <i>a</i> FOR ISAM <i>type</i> <i>b</i> AS <i>c</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; &lt;b&gt; <b>019B</b>
+<hr>RETRIEVE <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>019C</b>
+<hr>ROLLBACK</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>019D</b>
+<hr>ROLLBACK <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>019E</b>
+<hr>ROLLBACK ALL</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>{&lt;a&gt;}<sup>N</sup> <b>019F</b>
+<br>&nbsp;&nbsp;&nbsp;&nbsp;(0000 IF SEEKEQ
+<br>&nbsp;&nbsp;&nbsp;&nbsp;ELSE 0004 IF SEEKGE
+<br>&nbsp;&nbsp;&nbsp;&nbsp;ELSE 0008 IF SEEKGT)
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&lt;N:U16&gt;
+<hr>SEEKEQ &lt;a&gt;<sub>1</sub>, &hellip;, &lt;a&gt;<sub><i>N</i></sub>
+<br>SEEKGE &lt;a&gt;<sub>1</sub>, &hellip;, &lt;a&gt;<sub><i>N</i></sub>
+<br>SEEKGT &lt;a&gt;<sub>1</sub>, &hellip;, &lt;a&gt;<sub><i>N</i></sub></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>01A0</b>
+<hr>SETINDEX <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; &lt;b&gt; <b>01A1</b>
+<hr>SETINDEX <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'><b>01A2</b>
+<hr>STACK</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>01A3</b>
+<hr>STACK <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>01A4</b> 0098
+<hr>STOP <i>a</i></td>
+<td class='description'>See also <tt>0075</tt></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; <b>01A5</b>
+<hr>SYSTEM <i>a</i></td>
+<td class='description'>See also <tt>00EE</tt></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; &lt;b&gt; <b>01A6</b>
+<hr>UPDATE <i>a</i>, <i>b</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='3'>&lt;a&gt; &lt;b&gt; <b>01A7</b>
+<hr>(E) TEXTCOMP(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='3' class='undefined'></td>
+<td colspan='2'>&lt;decl<sup>0010</sup>&gt; <b>01A8</b>
+<hr>REDIM PRESERVE <i>decl</i></td>
+<td class='description'>A single item in a <tt>REDIM PRESERVE</tt> declaration
+<br><tt>REDIM PRESERVE</tt> statements are a sequence of <tt>01A8</tt> items, with no opcode starting the statement.</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01AA</b> &lt;name:IDN&gt;
+<hr>(E) TYPEOF <i>a</i> IS <i>name</i></td>
+<td class='description'>This can only appear inside an <tt>IF</tt> or <tt>ELSEIF</tt> statement.</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01AB</b>
+<hr>LOAD <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01AC</b>
+<hr>UNLOAD <i>a</i></td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td><b>01AD</b>
+<hr>(E) DOEVENTS()</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>01AF</b>
+<hr>(E) RGB(<i>a</i>, <i>b</i>, <i>c</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td><b>01B0</b>
+<hr>(E) ERROR$</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01B1</b>
+<hr>(E) ERROR$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01B2</b>
+<hr>(E) FORMAT$(<i>a</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; <b>01B3</b>
+<hr>(E) FORMAT$(<i>a</i>, <i>b</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>01B4</b>
+<hr>(E) DATESERIAL(<i>a</i>, <i>b</i>, <i>c</i>)</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01B5</b>
+<hr>(E) DATEVALUE(<i>a</i>)</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01B6</b>
+<hr>(E) DAY(<i>a</i>)</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01B7</b>
+<hr>(E) MONTH(<i>a</i>)</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01B8</b>
+<hr>(E) WEEKDAY(<i>a</i>)</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01B9</b>
+<hr>(E) YEAR(<i>a</i>)</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td><b>01BA</b>
+<hr>(E) NOW</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>01BB</b>
+<hr>(E) TIMESERIAL(<i>a</i>, <i>b</i>, <i>c</i>)</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01BC</b>
+<hr>(E) TIMEVALUE(<i>a</i>)</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01BD</b>
+<hr>(E) HOUR(<i>a</i>)</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01BE</b>
+<hr>(E) MINUTE(<i>a</i>)</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01BF</b>
+<hr>(E) SECOND(<i>a</i>)</td>
+<td class='description'>Note: in QuickBASIC 7.1, this is a library function</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td><b>01C0</b>
+<hr>OPTION EXPLICIT</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a<sup>000B</sup>&gt; <b>01C1</b></td>
+<td class='description'>For global objects such as <tt>CLIPBOARD</tt>, <tt>PRINTER</tt>, <tt>SCREEN</tt> or a form.
+<br>The expression <i>a</i> is the variable name.</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;REM<sup>0097, 00E3</sup>&gt; <b>01C2</b> ???? &lt;name:IDN&gt;
+<hr><i>REM</i> $FORM <i>name</i></td>
+<td class='description'>Appears after a comment opcode (<tt>REM</tt> or <tt>'</tt>)</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>(&lt;a&gt; OR 01C7) (&lt;b&gt; OR 01C7) &lt;c&gt; <b>01C3</b>
+<hr>(E) INPUTBOX$(<i>a</i>, [<i>b</i>], [<i>c</i>])</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; &lt;e&gt; <b>01C4</b>
+<hr>(E) INPUTBOX$(<i>a</i>, <i>b</i>, <i>c</i>, <i>d</i>, <i>e</i>)</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; (&lt;b&gt; OR 01C8) (&lt;c&gt; OR 01C7) <b>01C5</b>
+<hr>MSGBOX <i>a</i>, [<i>b</i>], [<i>c</i>]</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; (&lt;b&gt; OR 01C8) (&lt;c&gt; OR 01C7) <b>01C6</b>
+<hr>(E) MSGBOX$(<i>a</i>, [<i>b</i>], [<i>c</i>])</td>
+<td class='description'></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td><b>01C7</b></td>
+<td class='description'>Signifies a missing argument.
+<br>Appears in <tt>INPUTBOX$</tt> as well as for argument 3 in <tt>MSGBOX</tt>/<tt>MSGBOX$</tt></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td><b>01C8</b></td>
+<td class='description'>Signifies a missing argument.
+<br>Appears for argument 2 in <tt>MSGBOX</tt>/<tt>MSGBOX$</tt></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01C9</b> &lt;method:U16&gt;
+<hr><i>a</i>.<i>method</i>
+<hr>&lt;a&gt; <b>01C9</b> 0004 (&lt;a<sup>00FF</sup>&gt; IF USING) {&lt;item<sup>008F, 0090, 0091, 0092, 0094, 0095</sup>&gt;} &lt;item<sup>0093, 0096</sup>&gt;
+<hr><i>a</i>.PRINT [USING &lt;a&gt;;] &lt;item&gt;<sub>1</supb> &hellip;</td>
+<td rowspan='9' class='description'>The following methods are known:
+<table border='1'>
+<tr>
+<td>0000</td>
+<td>ADDITEM</td>
+</tr>
+<tr>
+<td>0001</td>
+<td>CLS</td>
+</tr>
+<tr>
+<td>0002</td>
+<td>HIDE</td>
+</tr>
+<tr>
+<td>0003</td>
+<td>MOVE</td>
+</tr>
+<tr>
+<td>0004</td>
+<td>PRINT</td>
+</tr>
+<tr>
+<td>0005</td>
+<td>PRINTFORM</td>
+</tr>
+<tr>
+<td>0006</td>
+<td>REFRESH</td>
+</tr>
+<tr>
+<td>0007</td>
+<td>REMOVEITEM</td>
+</tr>
+<tr>
+<td>0008</td>
+<td>SETFOCUS</td>
+</tr>
+<tr>
+<td>0009</td>
+<td>SHOW</td>
+</tr>
+<tr>
+<td>000C</td>
+<td>DRAG</td>
+</tr>
+<tr>
+<td>000D</td>
+<td>CLEAR</td>
+</tr>
+<tr>
+<td>000E</td>
+<td>ENDDOC</td>
+</tr>
+<tr>
+<td>0010</td>
+<td>NEWPAGE</td>
+</tr>
+<tr>
+<td>0011</td>
+<td>SETTEXT</td>
+</tr>
+<tr>
+<td>010A</td>
+<td>TEXTHEIGHT</td>
+</tr>
+<tr>
+<td>010B</td>
+<td>TEXTWIDTH</td>
+</tr>
+<tr>
+<td>010F</td>
+<td>GETTEXT</td>
+</tr>
+</table>
+</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; <b>01CA</b> 0011
+<hr><i>a</i>.SETTEXT <i>b</i></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; <b>01CB</b> &lt;method:U16&gt;
+<hr><i>a</i>.<i>method</i> <i>b</i></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>01CC</b> &lt;method:U16&gt;
+<hr><i>a</i>.<i>method</i> <i>b</i>, <i>c</i></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; <b>01CD</b> &lt;method:U16&gt;
+<hr><i>a</i>.<i>method</i> <i>b</i>, <i>c</i>, <i>d</i></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; &lt;d&gt; &lt;e&gt; <b>01CE</b> &lt;method:U16&gt;
+<hr><i>a</i>.<i>method</i> <i>b</i>, <i>c</i>, <i>d</i>, <i>e</i></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; &lt;c&gt; <b>01CF</b> 0000
+<hr><i>a</i>.ADDITEM <i>b</i>, <i>c</i></td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; <b>01D0</b> &lt;method:U16&gt;
+<hr>(E) <i>a</i>.<i>method</i>()</td>
+</tr>
+
+<tr>
+<td colspan='4' class='undefined'></td>
+<td>&lt;a&gt; &lt;b&gt; <b>01D1</b> &lt;method:U16&gt;
+<hr>(E) <i>a</i>.<i>method</i>(<i>b</i>)</td>
+</tr>
+
+</table>
+
+<p>Cross-reference for a few statement types:</p>
+
+<table border='1'>
+
+<tr>
+<td class='description'>QB4.0</td>
+<td class='description'>QB4.5</td>
+<td class='description'>QB7.0 and later</td>
+</tr>
+
+<tr>
+<td>[00EC IF LPRINT ELSE 0127 IF WRITE]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[&lt;#filenum<sup>00A6</sup>&gt;] [&lt;format<sup>0128</sup>&gt;]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;{&lt;item<sup>00B8, 00B9, 00BA, 00BB, 00BD, 00BE</sup>&gt;} &lt;item<sup>00BC, 00BF</sup>&gt;
+<hr>PRINT [{<i>#filenum</i> | USING <i>format</i>}] &hellip;
+<br>LPRINT [USING <i>format</i>] &hellip;
+<br>WRITE [<i>#filenum</i>] &hellip;</td>
+<td colspan='2'>[00C3 IF LPRINT ELSE 00FE IF WRITE ELSE &lt;object&gt; 01C9 0004]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[&lt;#filenum<sup>007D</sup>&gt;] [&lt;format<sup>00FF</sup>&gt;]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;{&lt;item<sup>008F, 0090, 0091, 0092, 0094, 0095</sup>&gt;} &lt;item<sup>0093, 0096</sup>&gt;
+<hr>PRINT [{<i>#filenum</i> | USING <i>format</i>}] &hellip;
+<br>LPRINT [USING <i>format</i>] &hellip;
+<br>WRITE [<i>#filenum</i>] &hellip;
+<br><i>object</i>.PRINT [USING <i>format</i>] &hellip;</td>
+</tr>
+
+<tr>
+<td>[&lt;#filenum&gt; 00B0 OR
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[&lt;prompt&gt;] 00B2 &lt;N+1:U16&gt; &lt;flags:U16&gt; [???? IF N&gt;1] IF INPUT]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;({&lt;item&gt; 00DF}<sup>N</sup> 00B1 IF INPUT
+<br>&nbsp;&nbsp;&nbsp;&nbsp;ELSE &lt;item&gt; 00E9 &lt;flags:U16&gt; IF LINE INPUT)
+<hr>INPUT (<i>#filenum</i>, | [;] [<i>prompt</i> (; | ,)]) <i>item</i><sub>1</sub>, &hellip;, <i>item</i><sub><i>N</i></sub>
+<br>LINE INPUT [<i>#filenum</i>,] <i>item</i></td>
+<td colspan='4'>[&lt;#filenum&gt; 0087 OR
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[&lt;prompt&gt;] 0089 &lt;N+1:U16&gt; &lt;flags:U16&gt; [???? IF N&gt;1] IF INPUT]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;({&lt;item&gt; 00B6}<sup>N</sup> 0088 IF INPUT
+<br>&nbsp;&nbsp;&nbsp;&nbsp;ELSE &lt;item&gt; 00C0 &lt;flags:U16&gt; IF LINE INPUT)
+<hr>INPUT (<i>#filenum</i>, | [;] [<i>prompt</i> (; | ,)]) <i>item</i><sub>1</sub>, &hellip;, <i>item</i><sub><i>N</i></sub>
+<br>LINE INPUT [<i>#filenum</i>,] <i>item</i></td>
+</tr>
+
+<tr>
+<td>[0040 IF (COMMON/DIM/REDIM) SHARED]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[0047 ???? IF "bare" SHARED
+<br>&nbsp;&nbsp;&nbsp;&nbsp;OR 0048 ???? IF STATIC
+<br>&nbsp;&nbsp;&nbsp;&nbsp;OR 00CE ???? (&lt;name:IDN&gt; OR FFFF) IF COMMON]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;{&lt;decl<sup>0017-001C</sup>&gt; [0042 IF DIM]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;|&lt;decl<sup>0029-002E</sup>&gt; [0044 IF DIM OR 0045 IF REDIM]}
+<hr>(COMMON [SHARED] [/<i>name</i>/]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;| DIM [SHARED]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;| REDIM [SHARED]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;| "bare" SHARED
+<br>&nbsp;&nbsp;&nbsp;&nbsp;| STATIC) <i>decl</i><sub>1</sub>, &hellip;
+<td colspan='4'>[001A IF (COMMON/DIM/REDIM) SHARED]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;[001E ???? IF "bare" SHARED
+<br>&nbsp;&nbsp;&nbsp;&nbsp;OR 001F ???? IF STATIC
+<br>&nbsp;&nbsp;&nbsp;&nbsp;OR 00A5 ???? (&lt;name:IDN&gt; OR FFFF) IF COMMON
+<br>&nbsp;&nbsp;&nbsp;&nbsp;OR 017D IF DIM]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;({&lt;decl<sup>000D, 0010</sup>&gt;}
+<br>&nbsp;&nbsp;&nbsp;&nbsp;OR {&lt;decl<sup>000E</sup>&gt; (01A8<sup>QB70</sup> IF PRESERVE ELSE 001C) IF REDIM)
+<hr>(COMMON [SHARED] [/<i>name</i>/]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;| DIM [SHARED]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;| REDIM [SHARED | PRESERVE<sup>QB70</sup>]
+<br>&nbsp;&nbsp;&nbsp;&nbsp;| "bare" SHARED
+<br>&nbsp;&nbsp;&nbsp;&nbsp;| STATIC) <i>decl</i><sub>1</sub>, &hellip;
+</tr>
+
+</body>
+</html>
+
