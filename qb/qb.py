@@ -1364,6 +1364,7 @@ class QBFileVersion:
 		0x01AB: (False, 'LOAD', 1),
 		0x01AC: (False, 'UNLOAD', 1),
 		0x01AD: (True, 'DOEVENTS', 0),
+		0x01AE: (True, 'QBCOLOR', 1),
 		0x01AF: (True, 'RGB', 3),
 		0x01B0: (True, 'ERROR$', -1),
 		0x01B1: (True, 'ERROR$', 1),
