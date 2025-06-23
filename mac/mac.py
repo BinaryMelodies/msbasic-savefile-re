@@ -96,7 +96,7 @@ TOKENS = {
 	0xE5: "TO",
 	0xE6: "THEN",
 	0xE7: "NOT",
-	0xE8: "'", # TODO: not sure what this is
+	0xE8: "'",
 	0xE9: ">",
 	0xEA: "=", # assignment or equality
 	0xEB: "<",
