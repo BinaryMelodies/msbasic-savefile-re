@@ -4308,6 +4308,1288 @@ Appears in <tt>CIRCLE</tt>, <tt>CLEAR</tt>, <tt>LOCATE</tt>, <tt>SCREEN</tt></td
 </tr>
 </table>
 
+<h1>Visual Basic for MS-DOS form layout</h1>
+
+<p>Visual Basic for MS-DOS comes with a visual form designer, and it can store it in a textual or binary format as well.
+The textual format is not documented to the author's knowledge, so it will also be explained in this document.</p>
+
+<p>When saved in text format, the program code is prefixed with a hierarchical structured representation of the visual layout.
+The first line will be <tt>Version 1.00</tt>, followed by the layout of the main Form object.
+An object has the following layout:</p>
+
+<pre>BEGIN <i>ControlType</i> <i>ControlName</i>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<i>AttributeName1</i> = <i>AttributeValue1</i>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<i>AttributeName2</i> = <i>AttributeValue2</i>
+&vellip;
+END</pre>
+
+<p>An object may also have subobjects, embedded in it (for example, controls within a form).
+These will appear as a new <tt>BEGIN</tt> block, right after all the attributes of the containing object, indented.
+A simplified example for a form would be as follows:</p>
+
+<pre>Version 1.00
+BEGIN Form MyForm
+&nbsp;&nbsp;&nbsp;&nbsp;Caption = "My Form"
+&nbsp;&nbsp;&nbsp;&nbsp;BEGIN CommandButton MyButton
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Caption = "My Button"
+&nbsp;&nbsp;&nbsp;&nbsp;END
+END
+
+' Here comes the program code</pre>
+
+<h2>Controls and attributes</h2>
+
+<p>Visual Basic for MS-DOS supports the following control types: <tt>CheckBox</tt>, <tt>ComboBox</tt>, <tt>CommandButton</tt>, <tt>DirListBox</tt>, <tt>DriveListBox</tt>, <tt>FileListBox</tt>, <tt>Form</tt>, <tt>Frame</tt>, <tt>HScrollBar</tt>, <tt>MDIForm</tt>, <tt>Menu</tt>, <tt>Label</tt>, <tt>ListBox</tt>, <tt>OptionButton</tt>, <tt>PictureBox</tt>, <tt>TextBox</tt>, <tt>Timer</tt>, <tt>VScrollBar</tt>.
+A form is always either <tt>Form</tt> or <tt>MDIForm</tt>, and these can only appear at the top level.</p>
+
+<p>We will not document all the valid and invalid options here, and will instead focus on what can appear in a textual source code.</p>
+
+<p>Attributes can take several types of values on the right side of the equality sign.
+Strings are enclosed within <tt>"</tt> symbols, and any <tt>"</tt> character inside is represented by a doubled <tt>""</tt> sequence.
+Integers always appear in decimal form, and they can be prefixed by a <tt>-</tt> sign.
+Booleans are represented by 0 for False and -1 for True, as the convention for Visual Basic.
+Some attributes can have values that appear as <tt>Char(<i>value</i>)</tt> or <tt>QBColor(<i>value</i>)</tt> where <i>value</i> is a non-negative decimal literal.</p>
+
+<p>The only exception to these types is the <tt>Shortcut</tt> attribute, whose value is a symbolic expression describing a key combination.
+The general syntax is <tt>[<i>shift</i>] [<i>control</i>] (<i>letter</i> | <i>function key</i>)</tt>, where <i>shift</i> is represented via the <tt>+</tt> symbol, <i> control</i> via <tt>^</tt>, <i>letter</i> as a single capital letter, and <i>function key</i> as an F-number enclosed in braces: <tt>{F<i>n</i>}</tt> where <i>n</i> is the function key number.</p>
+
+<p>Visual Basic for MS-DOS saves all attribute values, except for <tt>Index</tt> and <tt>Shortcut</tt>, if they are absent. Also note that <tt>MDIForm</tt> forms do not have a <tt>WindowState</tt> field, as it is implicitly set to 2 (maximized).</p>
+
+<h2>Binary file layout</h2>
+
+<p>When stored in binary format, the form layout is stored as part of the header.
+Unlike all versions of QuickBASIC, the header is now of a dynamic size, and 16-bit word at offset 0x14 gives the additional bytes of information in the form.
+The layout starts at offset 0x16, and all strings are represented as displacements from this point.</p>
+
+<p>The overall format of the layout is: 10 bytes of metadata, the form/control records, the string table, the form/control names, and two terminating bytes.</p>
+
+<h3>Metadata</h3>
+
+<p>The 10 bytes of metadata are as follows:</p>
+
+<pre>&lt;flags:U8&gt; ?? ?? ?? ?? ?? &lt;offset to names:U16&gt; &lt;total length of records:U16&gt;</pre>
+
+<p>When bit 0x04 in <i>flags</i> is set, the form is an <tt>MDIForm</tt> instead of a <tt>Form</tt>.
+The two types are only distinguished by this flag.</p>
+
+<h3>Form/control records</h3>
+
+<p>There can be an arbitrary number of records, and the size of each record depends on the type of the control.
+Attributes are represented here as the following types:</p>
+
+<dl>
+<dt><tt>BOOLEAN</tt></dt>
+<dd>A bit in a bitfield, either set or clear</dd>
+
+<dt><tt>INTEGER</tt></dt>
+<dd>An integer, between 0 and 32767</dd>
+
+<dt><tt>SIGNED</tt></dt>
+<dd>An integer, between -32768 and 32767</dd>
+
+<dt><tt>UNSIGNED</tt></dt>
+<dd>An integer, between 0 and 65535</dd>
+
+<dt><tt>CHAR</tt></dt>
+<dd>An integer, represented in the source code using the <tt>Char(<i>value</i>)</tt> syntax</dd>
+
+<dt><tt>QBCOLOR</tt></dt>
+<dd>An integer, represented in the source code using the <tt>QBColor(<i>value</i>)</tt> syntax</dd>
+
+<dt><tt>STRING</tt></dt>
+<dd>A string, represented as an offset into the string table</dd>
+</dl>
+
+<p>Many of the attribute fields appear for multiple types of records, but most control types have some special fields to them.
+The following table lists the recurring as well as special fields.
+Any byte not accounted for is currently unknown.</p>
+
+<table border='1'>
+<tr>
+<td>Offset</td>
+<td>Size</td>
+<td>Name</td>
+<td>Type</td>
+<td>Form<br>MDIForm</td>
+<td>CheckBox</td>
+<td>OptionButton</td>
+<td>ComboBox</td>
+<td>CommandButton</td>
+<td>DirListBox</td>
+<td>DriveListBox</td>
+<td>FileListBox</td>
+<td>Frame</td>
+<td>HScrollBar</td>
+<td>VScrollBar</td>
+<td>Label</td>
+<td>ListBox</td>
+<td>Menu</td>
+<td>PictureBox</td>
+<td>TextBox</td>
+<td>Timer</td>
+</tr>
+
+<tr>
+<td colspan='2' class='undefined'></td>
+<td colspan='2' class='description'>Record length</td>
+<td>0x1F</td>
+<td colspan='2'>0x1C</td>
+<td>0x27</td>
+<td>0x1C</td>
+<td colspan='2'>0x20</td>
+<td>0x24</td>
+<td>0x1A</td>
+<td colspan='2'>0x20</td>
+<td>0x1C</td>
+<td>0x20</td>
+<td>0x1A</td>
+<td>0x1F</td>
+<td>0x22</td>
+<td>0x1C</td>
+</tr>
+
+<tr>
+<td>0x00</td>
+<td>1</td>
+<td colspan='2' class='description'>Control name index</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+</tr>
+
+<tr>
+<td>0x01</td>
+<td>1</td>
+<td colspan='2' class='description'>Control type</td>
+<td>0x00</td>
+<td>0x01</td>
+<td>0x0C</td>
+<td>0x02</td>
+<td>0x03</td>
+<td>0x04</td>
+<td>0x05</td>
+<td>0x06</td>
+<td>0x07</td>
+<td>0x08</td>
+<td>0x10</td>
+<td>0x09</td>
+<td>0x0A</td>
+<td>0x0B</td>
+<td>0x0D</td>
+<td>0x0E</td>
+<td>0x0F</td>
+</tr>
+
+<tr>
+<td rowspan='2' colspan='2'>0x03, bit 0</td>
+<td>ReadOnly</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>Separator</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='2' colspan='2'>0x03, bit 1</td>
+<td>MaxButton</td>
+<td>BOOLEAN</td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>Hidden</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='2' colspan='2'>0x03, bit 2</td>
+<td>Default</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>System</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td colspan='2'>0x03, bit 3</td>
+<td>AutoRedraw</td>
+<td>BOOLEAN</td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td colspan='2'>0x03, bit 4</td>
+<td class='undefined'></td>
+<td></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='2' colspan='2'>0x03, bit 5</td>
+<td>ControlBox</td>
+<td>BOOLEAN</td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>Archive</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='2' colspan='2'>0x03, bit 6</td>
+<td>Checked</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>AutoSize</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='2' colspan='2'>0x03, bit 7</td>
+<td>Sorted</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>Attached</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td colspan='2'>0x03, bit 8</td>
+<td>Enabled</td>
+<td>BOOLEAN</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+</tr>
+
+<tr>
+<td colspan='2'>0x03, bit 9</td>
+<td class='undefined'></td>
+<td></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='2' colspan='2'>0x03, bit 10</td>
+<td>MinButton</td>
+<td>BOOLEAN</td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>Normal</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td colspan='2'>0x03, bit 11</td>
+<td>MultiLine</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td colspan='2'>0x03, bit 12</td>
+<td>Cancel</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td colspan='2'>0x03, bit 13</td>
+<td class='undefined'></td>
+<td></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td colspan='2'>0x03, bit 14</td>
+<td>TabStop</td>
+<td>BOOLEAN</td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td colspan='2'>0x03, bit 15</td>
+<td>Visible</td>
+<td>BOOLEAN</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>0x07</td>
+<td>2</td>
+<td colspan='2' class='description'>offset to parent record</td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+</tr>
+
+<tr>
+<td>0x09</td>
+<td>2</td>
+<td>Tag</td>
+<td>STRING or 0</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+</tr>
+
+<tr>
+<td>0x0B</td>
+<td>2</td>
+<td>Index</td>
+<td>INTEGER</td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+</tr>
+
+<tr>
+<td>0x0F</td>
+<td>1</td>
+<td>Top</td>
+<td>CHAR</td>
+<td class='description'>normal</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+</tr>
+
+<tr>
+<td>0x10</td>
+<td>1</td>
+<td>Left</td>
+<td>CHAR</td>
+<td class='description'>normal</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+</tr>
+
+<tr>
+<td>0x11</td>
+<td>1</td>
+<td>Height</td>
+<td>CHAR</td>
+<td class='description'>normal</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>0x12</td>
+<td>1</td>
+<td>Width</td>
+<td>CHAR</td>
+<td class='description'>normal</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>0x13</td>
+<td>1</td>
+<td>MousePointer</td>
+<td>INTEGER</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='2'>0x14</td>
+<td>1</td>
+<td>WindowState</td>
+<td>INTEGER</td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>1</td>
+<td>TabIndex</td>
+<td>INTEGER</td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='2'>0x15</td>
+<td>2</td>
+<td>Value</td>
+<td>SIGNED</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>1</td>
+<td>BackColor</td>
+<td>QBCOLOR</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>0x16</td>
+<td>1</td>
+<td>ForeColor</td>
+<td>QBCOLOR</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>0x17</td>
+<td>1</td>
+<td>DragMode</td>
+<td>INTEGER</td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='3'>0x18</td>
+<td>2</td>
+<td>LargeChange</td>
+<td>INTEGER</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>2</td>
+<td>Caption</td>
+<td>STRING</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>2</td>
+<td>Interval</td>
+<td>UNSIGNED</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+</tr>
+
+<tr>
+<td rowspan='3'>0x1A</td>
+<td>2</td>
+<td>SmallChange</td>
+<td>INTEGER</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>1</td>
+<td>BorderStyle</td>
+<td>INTEGER</td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>1</td>
+<td>Value</td>
+<td>INTEGER</td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='2'>0x1B</td>
+<td>1</td>
+<td>Alignment</td>
+<td>INTEGER</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>1</td>
+<td>ScrollBars</td>
+<td>INTEGER</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='2'>0x1C</td>
+<td>2</td>
+<td>Max</td>
+<td>SIGNED</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>2</td>
+<td>Text</td>
+<td>STRING</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>0x1D</td>
+<td>1</td>
+<td class='description'>inner height</td>
+<td>INTEGER</td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td rowspan='2'>0x1E</td>
+<td>2</td>
+<td>Min</td>
+<td>SIGNED</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>1</td>
+<td class='description'>inner width</td>
+<td>INTEGER</td>
+<td>&check;</td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>0x22</td>
+<td>2</td>
+<td>Pattern</td>
+<td>STRING</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>0x24</td>
+<td>2</td>
+<td>Text</td>
+<td>STRING</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+<tr>
+<td>0x26</td>
+<td>1</td>
+<td>Style</td>
+<td>INTEGER</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td>&check;</td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td colspan='2' class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+<td class='undefined'></td>
+</tr>
+
+</table>
+
+<p>The field <i>offset to parent record</i> is used to describe the control hierarchy.
+Each control can appear inside another control or form, and this field stores the offset from 0x16 to the start of the parent record.</p>
+
+<p>For <tt>Form</tt>s, <tt>Top</tt>, <tt>Left</tt>, <tt>Height</tt> and <tt>Width</tt> stores the values for the <i>normal</i> state, i. e. when the window is neither minimized nor maximized.
+When the window is minimized or maximized, these are not the values displayed in the editor, nor the values saved in the textual output.
+The normal state values are not stored in the plain text format.</p>
+
+<p>For <tt>Menu</tt>s, <tt>Caption</tt> stores the <tt>Shortcut</tt> field as well, separated from the caption by a tab character.
+The <tt>Shortcut</tt> field is stored in the format it displays at runtime, so a capital letter or <tt>F<i>n</i></tt> for a function key, prefixed by <tt>Shift+</tt> and <tt>Ctrl+</tt> if needed.</p>
+
+<h3>String table</h3>
+
+<p>The string table is a sequence of strings, each prefixed by a 16-bit word to signify the length.
+Each entry is addressed as an offset relative to 0x16.
+Visual Basic for MS-DOS stores strings separately for each instance they appear as, even if it results in duplication.</p>
+
+<h3>Name table</h3>
+
+<p>The name table is a sequence of strings, each prefixed by an 8-bit word to signifiy the length.
+Each entry is addressed as a 0-based index in the list.
+Two controls cannot share the same name, except if they belong in the same control array, in which case their names appear only once in the name table.</p>
+
+<p>The name table is followed by two bytes of unknown value, terminating the additional bytes for the header.</p>
+
 </body>
 </html>
 
