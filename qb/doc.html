@@ -178,9 +178,9 @@ All three types of procedures continue with a sequence of 16-bit words describin
 
 <p>The header of a <tt>SUB</tt> or <tt>FUNCTION</tt> has the following format:</p>
 
-<pre>?? &lt;length:U8&gt; &lt;name&gt; ?? ?? &lt;flags:U8&gt;</pre>
+<pre>?? &lt;length:U16&gt; &lt;name&gt; ?? ?? &lt;flags:U8&gt;</pre>
 
-<p>The second byte contains the length of the name of the procedure, followed by the actual characters.
+<p>The second and third bytes contains the length of the name of the procedure, followed by the actual characters.
 Two unknown bytes follow, as well as a <i>flags</i> byte.
 Only bit 7 is currently known, it represents a <tt>STATIC</tt> procedure.
 Note that the <tt>STATIC</tt> keyword does not appear in the opcode stream.</p>
