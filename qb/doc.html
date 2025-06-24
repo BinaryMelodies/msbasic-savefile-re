@@ -5155,7 +5155,7 @@ Any byte not accounted for is currently unknown.</p>
 <tr>
 <td rowspan='2'>0x15</td>
 <td>2</td>
-<td>Value</td>
+<td>Value<sup>*</sup></td>
 <td>SIGNED</td>
 <td class='undefined'></td>
 <td colspan='2' class='undefined'></td>
@@ -5339,7 +5339,7 @@ Any byte not accounted for is currently unknown.</p>
 
 <tr>
 <td>1</td>
-<td>Value</td>
+<td>Value<sup>*</sup></td>
 <td>INTEGER</td>
 <td class='undefined'></td>
 <td colspan='2'>&check;</td>
@@ -5421,7 +5421,7 @@ Any byte not accounted for is currently unknown.</p>
 
 <tr>
 <td>2</td>
-<td>Text</td>
+<td>Text<sup>*</sup></td>
 <td>STRING</td>
 <td class='undefined'></td>
 <td colspan='2' class='undefined'></td>
@@ -5525,7 +5525,7 @@ Any byte not accounted for is currently unknown.</p>
 <tr>
 <td>0x24</td>
 <td>2</td>
-<td>Text</td>
+<td>Text<sup>*</sup></td>
 <td>STRING</td>
 <td class='undefined'></td>
 <td colspan='2' class='undefined'></td>
@@ -5564,6 +5564,8 @@ Any byte not accounted for is currently unknown.</p>
 <td class='undefined'></td>
 </tr>
 </table>
+
+<p>Fields that appear multiple times at different positions for different controls are marked with a <sup>*</sup>.</p>
 
 <p>The field <i>offset to parent record</i> is used to describe the control hierarchy.
 Each control can appear inside another control or form, and this field stores the offset from 0x16 to the start of the parent record.</p>
