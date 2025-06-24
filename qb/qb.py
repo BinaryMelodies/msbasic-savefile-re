@@ -182,7 +182,7 @@ class Identifier(Element):
 		else:
 			return self.name.decode('cp437') + (self.suffix.get_suffix() if self.suffix is not None else "")
 
-class GlobalObject(Element):
+class ExternalObject(Element):
 	# VBDOS
 	def __init__(self, name):
 		self.name = name
@@ -2380,7 +2380,7 @@ class QBFileVersion:
 			cxt.push(TypeOfIsOperator(arg, typename))
 		elif opcode == 0x01C1:
 			arg = cxt.pop()
-			cxt.push(GlobalObject(arg))
+			cxt.push(ExternalObject(arg))
 		elif opcode == 0x01C2:
 			read16(file)
 			name = cxt.readvar(file)
