@@ -4766,6 +4766,25 @@ Any byte not accounted for is currently unknown.</p>
 </tr>
 
 <tr>
+<td colspan='2'>0x03, bit 9</td>
+<td colspan='2' class='description'>set for control arrays</td>
+<td class='undefined'></td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td colspan='2'>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+<td>&check;</td>
+</tr>
+
+<tr>
 <td rowspan='2' colspan='2'>0x03, bit 10</td>
 <td>MinButton</td>
 <td>BOOLEAN</td>
@@ -4856,7 +4875,7 @@ Any byte not accounted for is currently unknown.</p>
 <td>&check;</td>
 <td class='undefined'></td>
 <td colspan='2'>&check;</td>
-<td>&check;</td>
+<td class='undefined'></td>
 <td>&check;</td>
 <td class='undefined'></td>
 <td>&check;</td>
@@ -4878,7 +4897,7 @@ Any byte not accounted for is currently unknown.</p>
 <td colspan='2'>&check;</td>
 <td>&check;</td>
 <td>&check;</td>
-<td class='undefined'></td>
+<td>&check;</td>
 <td>&check;</td>
 <td>&check;</td>
 <td class='undefined'></td>
@@ -5510,12 +5529,17 @@ Any byte not accounted for is currently unknown.</p>
 <p>The field <i>offset to parent record</i> is used to describe the control hierarchy.
 Each control can appear inside another control or form, and this field stores the offset from 0x16 to the start of the parent record.</p>
 
+<p>The field <i>set for control array</i> is set if the control is a member of a control array.
+In particular the <tt>Index</tt> field only contains a valid value (and present in the text output) if this bit is set.</p>
+
 <p>For <tt>Form</tt>s, <tt>Top</tt>, <tt>Left</tt>, <tt>Height</tt> and <tt>Width</tt> stores the values for the <i>normal</i> state, i. e. when the window is neither minimized nor maximized.
 When the window is minimized or maximized, these are not the values displayed in the editor, nor the values saved in the textual output.
 The normal state values are not stored in the plain text format.</p>
 
 <p>For <tt>Menu</tt>s, <tt>Caption</tt> stores the <tt>Shortcut</tt> field as well, separated from the caption by a tab character.
 The <tt>Shortcut</tt> field is stored in the format it displays at runtime, so a capital letter or <tt>F<i>n</i></tt> for a function key, prefixed by <tt>Shift+</tt> and <tt>Ctrl+</tt> if needed.</p>
+
+<p>Note: apparently the record table may end with several additional bytes whose meaning is unknown.</p>
 
 <h3>String table</h3>
 

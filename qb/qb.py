@@ -60,6 +60,8 @@ class Element:
 	def __repr__(self):
 		return self.__class__.__name__ + repr(self.__dict__)
 
+#### Data types
+
 class AnyType(Element):
 	def get_name(self):
 		return "ANY"
@@ -156,6 +158,8 @@ class CustomType(Element):
 
 	def get_suffix(self):
 		raise Exception("Custom type has no type suffix")
+
+#### Syntactic elements
 
 class Identifier(Element):
 	def __init__(self, name, offset, suffix = None):
@@ -1106,6 +1110,8 @@ class Comment(Element):
 	def print(self, **kwds):
 		return "'" + self.text.decode('cp437') + (self.metacommand.print(**kwds) if self.metacommand is not None else "")
 
+#### BASIC line
+
 class Line(Element):
 	def __init__(self, *statements, label = None, indent = 0, comment = None):
 		self.statements = list(statements)
@@ -1145,6 +1151,8 @@ class Line(Element):
 			line += self.comment.print(**kwds)
 		return line
 
+#### BASIC procedure
+
 class Procedure(Element):
 	def __init__(self, name = None, kind = None, static = False):
 		self.name = name
@@ -1156,7 +1164,425 @@ class Procedure(Element):
 		for line in self.lines:
 			print(line.print(**kwds), file = file)
 
-class QBFileVersion:
+#### BASIC forms and controls
+
+class Attribute:
+	def __init__(self, name, _type, value, comment = None):
+		assert _type in {'STRING', 'INTEGER', 'CHAR', 'QBCOLOR', 'BOOLEAN', 'UNSIGNED', 'OFFSET', 'SHORTCUT'}
+		if _type == 'STRING':
+			assert type(value) is bytes
+		elif _type == 'SHORTCUT':
+			assert type(value) is str
+		else:
+			assert type(value) is int
+		self.name = name
+		self.type = _type
+		self.value = value
+		self.present = True
+
+	def print(self):
+		text = f"{self.name:12} = "
+		if self.type == 'STRING':
+			text += '"' + self.value.decode('cp437').replace('"', '""') + '"'
+		elif self.type == 'CHAR':
+			text += f'Char({self.value})'
+		elif self.type == 'QBCOLOR':
+			text += f'QBColor({self.value})'
+		else:
+			text += str(self.value)
+		return text
+
+class Object:
+	def __init__(self, name, _type):
+		self.name = name
+		self.type = _type
+		self.attributes = {}
+		self.members = []
+
+	def print(self, indent = '', file = None):
+		print(indent + "BEGIN " + self.type + " " + self.name, file = file)
+		for attribute, value in sorted(self.attributes.items(), key = lambda pair: pair[0]):
+			if len(attribute) == 0 or not attribute[0].isalpha():
+				continue
+			if not value.present:
+				continue
+			print(indent + "\t" + value.print(), file = file)
+		for member in self.members:
+			member.print(indent + "\t", file = file)
+		print(indent + "END", file = file)
+
+#### Parsing
+
+VBDOS_CONTROL_TYPES = {
+	0: ("Form", 0x1F, [
+		1,
+		(2, "BOOLEAN",
+			[None, "MaxButton", None, "AutoRedraw", None, "ControlBox", None, None, "Enabled", None, "MinButton", None, None, None, None, "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		4,
+		(1, "CHAR", "*Top"),
+		(1, "CHAR", "*Left"),
+		(1, "CHAR", "*Height"),
+		(1, "CHAR", "*Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "WindowState"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		1,
+		(2, "STRING", "Caption"),
+		(1, "INTEGER", "BorderStyle"),
+		2,
+		(1, "INTEGER", "&Height"),
+		(1, "INTEGER", "&Width"),
+	]),
+	1: ("CheckBox", 0x1C, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, None, None, None, "Enabled", "&Index", None, None, None, None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		(1, "INTEGER", "DragMode"),
+		(2, "STRING", "Caption"),
+		(1, "INTEGER", "Value"),
+		1,
+	]),
+	2: ("ComboBox", 0x27, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, None, None, "Sorted", "Enabled", "&Index", None, None, None, None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		(1, "INTEGER", "DragMode"),
+		12,
+		(2, "STRING", "Text"),
+		(1, "INTEGER", "Style"),
+	]),
+	3: ("CommandButton", 0x1C, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, "Default", None, None, None, None, None, "Enabled", "&Index", None, None, "Cancel", None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		1,
+		(1, "INTEGER", "DragMode"),
+		(2, "STRING", "Caption"),
+		2,
+	]),
+	4: ("DirListBox", 0x20, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, None, None, None, "Enabled", "&Index", None, None, None, None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		(1, "INTEGER", "DragMode"),
+		8,
+	]),
+	5: ("DriveListBox", 0x20, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, None, None, None, "Enabled", "&Index", None, None, None, None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		(1, "INTEGER", "DragMode"),
+		8,
+	]),
+	6: ("FileListBox", 0x24, [
+		1,
+		(2, "BOOLEAN",
+			["ReadOnly", "Hidden", "System", None, None, "Archive", None, None, "Enabled", "&Index", "Normal", None, None, None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		(1, "INTEGER", "DragMode"),
+		10,
+		(2, "STRING", "Pattern"),
+	]),
+	7: ("Frame", 0x1A, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, None, None, None, "Enabled", "&Index", None, None, None, None, None, "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		(1, "INTEGER", "DragMode"),
+		(2, "STRING", "Caption"),
+	]),
+	8: ("HScrollBar", 0x20, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, None, None, "Attached", "Enabled", "&Index", None, None, None, None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(2, "INTEGER", "Value"),
+		(1, "INTEGER", "DragMode"),
+		(2, "INTEGER", "LargeChange"),
+		(2, "INTEGER", "SmallChange"),
+		(2, "INTEGER", "Max"),
+		(2, "INTEGER", "Min"),
+	]),
+	9: ("Label", 0x1C, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, "AutoSize", None, None, "Enabled", "&Index", None, None, None, None, None, "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		(1, "INTEGER", "DragMode"),
+		(2, "STRING", "Caption"),
+		(1, "INTEGER", "BorderStyle"),
+		(1, "INTEGER", "Alignment"),
+	]),
+	10: ("ListBox", 0x20, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, None, None, "Sorted", "Enabled", "&Index", None, None, None, None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		(1, "INTEGER", "DragMode"),
+		8,
+	]),
+	11: ("Menu", 0x1A, [
+		1,
+		(2, "BOOLEAN",
+			["Separator", None, None, None, None, None, "Checked", None, "Enabled", "&Index", None, None, None, None, None, "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		11,
+		(2, "STRING", "Caption"),
+	]),
+	12: ("OptionButton", 0x1C, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, None, None, None, "Enabled", "&Index", None, None, None, None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		(1, "INTEGER", "DragMode"),
+		(2, "STRING", "Caption"),
+		(1, "BOOLEAN", "Value"),
+		1,
+	]),
+	13: ("PictureBox", 0x1F, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, "AutoRedraw", None, None, None, None, "Enabled", "&Index", None, None, None, None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		(1, "INTEGER", "DragMode"),
+		2,
+		(1, "INTEGER", "BorderStyle"),
+		4,
+	]),
+	14: ("TextBox", 0x22, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, None, None, None, "Enabled", "&Index", None, "MultiLine", None, None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(1, "QBCOLOR", "BackColor"),
+		(1, "QBCOLOR", "ForeColor"),
+		(1, "INTEGER", "DragMode"),
+		2,
+		(1, "INTEGER", "BorderStyle"),
+		(1, "INTEGER", "ScrollBars"),
+		(2, "STRING", "Text"),
+		2,
+	]),
+	15: ("Timer", 0x1C, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, None, None, None, "Enabled", "&Index", None, None, None, None, None, None]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		7,
+		(2, "UNSIGNED", "Interval"),
+		2,
+	]),
+	16: ("VScrollBar", 0x20, [
+		1,
+		(2, "BOOLEAN",
+			[None, None, None, None, None, None, None, "Attached", "Enabled", "&Index", None, None, None, None, "TabStop", "Visible"]
+		),
+		2,
+		(2, "OFFSET", "~"),
+		(2, "STRING", "Tag"),
+		(2, "INTEGER", "Index"),
+		2,
+		(1, "CHAR", "Top"),
+		(1, "CHAR", "Left"),
+		(1, "CHAR", "Height"),
+		(1, "CHAR", "Width"),
+		(1, "INTEGER", "MousePointer"),
+		(1, "INTEGER", "TabIndex"),
+		(2, "INTEGER", "Value"),
+		(1, "INTEGER", "DragMode"),
+		(2, "INTEGER", "LargeChange"),
+		(2, "INTEGER", "SmallChange"),
+		(2, "INTEGER", "Max"),
+		(2, "INTEGER", "Min"),
+	]),
+}
+
+class BasicFileVersion:
 	# None: count comes from next word in opcode stream
 	# -1: no parentheses (only for functions)
 	# an optional fourth argument may include the following keyword arguments:
@@ -1504,7 +1930,7 @@ class QBFileVersion:
 			dims = cxt.pop(argcount)
 			cxt.put_statement(AssignmentStatement(ArrayElement(name, *dims), value))
 		elif opcode == 0x0010:
-			if self.get_version_stamp() == QBFileVersion40.VERSION_STAMP \
+			if self.get_version_stamp() == BasicFileVersionQB40.VERSION_STAMP \
 			and (cxt.peek_statement(VariableDeclarationStatement) is None \
 			or cxt.peek_statement(VariableDeclarationStatement).kind in {None, 'DIM', 'REDIM'}):
 				# QB40 treats this case like 0x000E
@@ -1729,7 +2155,7 @@ class QBFileVersion:
 					arg_name = cxt.readvar(file)
 					mode = read16(file)
 					arg_type = self.get_type(cxt, file, read16(file))
-					if self.get_version_stamp() >= QBFileVersion71.VERSION_STAMP:
+					if self.get_version_stamp() >= BasicFileVersionQB71.VERSION_STAMP:
 						read16(file)
 					args.append(ArgumentDeclaration(arg_name, arg_type, array = (mode & 0x0400) != 0))
 			if alias_length != 0:
@@ -1752,7 +2178,7 @@ class QBFileVersion:
 				arg_name = cxt.readvar(file)
 				mode = read16(file)
 				as_type = read16(file)
-				if self.get_version_stamp() >= QBFileVersion71.VERSION_STAMP:
+				if self.get_version_stamp() >= BasicFileVersionQB71.VERSION_STAMP:
 					read16(file)
 				if (mode & 0x2000) != 0:
 					args.append(ArgumentDeclaration(arg_name, self.get_builtin_type(as_type)))
@@ -1760,7 +2186,7 @@ class QBFileVersion:
 					if (mode & 0x0200) != 0:
 						arg_name.suffix = self.get_builtin_type(as_type)
 					args.append(ArgumentDeclaration(arg_name, None))
-			cxt.begin_deffn(DefFnDeclaration(name, *args, isvbdos = self.get_version_stamp() == QBFileVersionVB.VERSION_STAMP))
+			cxt.begin_deffn(DefFnDeclaration(name, *args, isvbdos = self.get_version_stamp() == BasicFileVersionVBDOS.VERSION_STAMP))
 		elif opcode == 0x0046:
 			cxt.put_statement(DoStatement())
 		elif opcode == 0x0047:
@@ -1828,11 +2254,11 @@ class QBFileVersion:
 				else:
 					read16(file)
 					arg_type = None
-				if self.get_version_stamp() >= QBFileVersion71.VERSION_STAMP:
+				if self.get_version_stamp() >= BasicFileVersionQB71.VERSION_STAMP:
 					read16(file)
 				args.append(ArgumentDeclaration(arg_name, arg_type, array = (mode & 0x0400) != 0))
 			cxt.qbfile.procedures[-1].kind = 'FUNCTION'
-			cxt.put_statement(ProcedureStatement('FUNCTION', name, args, static = cxt.qbfile.procedures[-1].static, isvbdos = self.get_version_stamp() >= QBFileVersionVB.VERSION_STAMP))
+			cxt.put_statement(ProcedureStatement('FUNCTION', name, args, static = cxt.qbfile.procedures[-1].static, isvbdos = self.get_version_stamp() >= BasicFileVersionVBDOS.VERSION_STAMP))
 		elif opcode == 0x0059:
 			target = cxt.readvar(file)
 			cxt.put_statement(GosubStatement(target))
@@ -1872,7 +2298,7 @@ class QBFileVersion:
 			read16(file)
 			read16(file)
 		elif opcode == 0x0067 or opcode == 0x0199: # QB70+
-			if self.get_version_stamp() >= QBFileVersion70.VERSION_STAMP:
+			if self.get_version_stamp() >= BasicFileVersionQB70.VERSION_STAMP:
 				target_offset = read16(file)
 				if target_offset == 0xFFFF:
 					target = DecimalInteger(0) # instead of identifier
@@ -1944,11 +2370,11 @@ class QBFileVersion:
 				else:
 					read16(file)
 					arg_type = None
-				if self.get_version_stamp() >= QBFileVersion71.VERSION_STAMP:
+				if self.get_version_stamp() >= BasicFileVersionQB71.VERSION_STAMP:
 					read16(file)
 				args.append(ArgumentDeclaration(arg_name, arg_type, array = (mode & 0x0400) != 0))
 			cxt.qbfile.procedures[-1].kind = 'SUB'
-			cxt.put_statement(ProcedureStatement('SUB', name, args, static = cxt.qbfile.procedures[-1].static, isvbdos = self.get_version_stamp() >= QBFileVersionVB.VERSION_STAMP))
+			cxt.put_statement(ProcedureStatement('SUB', name, args, static = cxt.qbfile.procedures[-1].static, isvbdos = self.get_version_stamp() >= BasicFileVersionVBDOS.VERSION_STAMP))
 		elif opcode == 0x007D:
 			cxt.put_statement_kind(PrintStatement).add_filenumber(cxt.pop())
 		elif opcode == 0x007E:
@@ -2039,7 +2465,7 @@ class QBFileVersion:
 			text = reads(file)
 			cxt.put_statement(DataDeclaration(text[2:-1]))
 		elif opcode == 0x00AC:
-			if self.get_version_stamp() < QBFileVersion70.VERSION_STAMP:
+			if self.get_version_stamp() < BasicFileVersionQB70.VERSION_STAMP:
 				argcount = read16(file)
 				args = cxt.pop(argcount)
 				cxt.put_statement(EraseStatement(*args))
@@ -2390,7 +2816,7 @@ class QBFileVersion:
 		elif opcode == 0x01C9:
 			target = cxt.pop()
 			method = read16(file)
-			method_name = QBFileVersionVB.METHOD_NAMES[method]
+			method_name = BasicFileVersionVBDOS.METHOD_NAMES[method]
 			if method_name == 'PRINT':
 				cxt.put_statement(PrintStatement("PRINT", target))
 			else:
@@ -2399,40 +2825,40 @@ class QBFileVersion:
 			args = cxt.pop(1)
 			target = cxt.pop()
 			method = read16(file)
-			method_name = QBFileVersionVB.METHOD_NAMES[method]
+			method_name = BasicFileVersionVBDOS.METHOD_NAMES[method]
 			cxt.put_statement(MethodSubCall(target, method_name, *args))
 		elif opcode == 0x01CC or opcode == 0x01CF:
 			args = cxt.pop(2)
 			target = cxt.pop()
 			method = read16(file)
-			method_name = QBFileVersionVB.METHOD_NAMES[method]
+			method_name = BasicFileVersionVBDOS.METHOD_NAMES[method]
 			cxt.put_statement(MethodSubCall(target, method_name, *args))
 		elif opcode == 0x01CD:
 			args = cxt.pop(3)
 			target = cxt.pop()
 			method = read16(file)
-			method_name = QBFileVersionVB.METHOD_NAMES[method]
+			method_name = BasicFileVersionVBDOS.METHOD_NAMES[method]
 			cxt.put_statement(MethodSubCall(target, method_name, *args))
 		elif opcode == 0x01CE:
 			args = cxt.pop(4)
 			target = cxt.pop()
 			method = read16(file)
-			method_name = QBFileVersionVB.METHOD_NAMES[method]
+			method_name = BasicFileVersionVBDOS.METHOD_NAMES[method]
 			cxt.put_statement(MethodSubCall(target, method_name, *args))
 		elif opcode == 0x01D0:
 			target = cxt.pop()
 			method = read16(file)
-			method_name = QBFileVersionVB.METHOD_NAMES[method]
+			method_name = BasicFileVersionVBDOS.METHOD_NAMES[method]
 			cxt.push(MethodFunctionCall(target, method_name))
 		elif opcode == 0x01D1:
 			args = cxt.pop(1)
 			target = cxt.pop()
 			method = read16(file)
-			method_name = QBFileVersionVB.METHOD_NAMES[method]
+			method_name = BasicFileVersionVBDOS.METHOD_NAMES[method]
 			cxt.push(MethodFunctionCall(target, method_name, *args))
 		else:
-			if opcode in QBFileVersion.BUILTINS:
-				elements = QBFileVersion.BUILTINS[opcode]
+			if opcode in BasicFileVersion.BUILTINS:
+				elements = BasicFileVersion.BUILTINS[opcode]
 				isfun, name, argcount = elements[:3]
 				extra_info = elements[3] if len(elements) > 3 else {}
 
@@ -2464,10 +2890,10 @@ class QBFileVersion:
 			else:
 				raise Exception(f"Invalid opcode {actual_opcode:04X}")
 
-class QBFileVersion40(QBFileVersion):
+class BasicFileVersionQB40(BasicFileVersion):
 	VERSION_STAMP = 0x0013
 	def get_version_stamp(self):
-		return QBFileVersion40.VERSION_STAMP
+		return BasicFileVersionQB40.VERSION_STAMP
 
 	def get_header_size(self):
 		return 0x0E
@@ -2501,25 +2927,25 @@ class QBFileVersion40(QBFileVersion):
 		if opcode > self.get_maximum_opcode():
 			raise Exception(f"Invalid opcode {opcode:04X}")
 		if opcode <= 0x000A:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, opcode, parameter, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, opcode, parameter, actual_opcode = opcode)
 		elif 0x000B <= opcode <= 0x0010:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x000B, opcode - 0x000B, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x000B, opcode - 0x000B, actual_opcode = opcode)
 		elif 0x0011 <= opcode <= 0x0016:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x000C, opcode - 0x0011, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x000C, opcode - 0x0011, actual_opcode = opcode)
 		elif 0x0017 <= opcode <= 0x001C:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x000D, opcode - 0x0017, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x000D, opcode - 0x0017, actual_opcode = opcode)
 		elif 0x001D <= opcode <= 0x0022:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x000E, opcode - 0x001D, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x000E, opcode - 0x001D, actual_opcode = opcode)
 		elif 0x0023 <= opcode <= 0x0028:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x000F, opcode - 0x0023, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x000F, opcode - 0x0023, actual_opcode = opcode)
 		elif 0x0029 <= opcode <= 0x002E:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x0010, opcode - 0x0029, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x0010, opcode - 0x0029, actual_opcode = opcode)
 		elif 0x002F <= opcode <= 0x0034:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x0011, opcode - 0x002F, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x0011, opcode - 0x002F, actual_opcode = opcode)
 		elif 0x0035 <= opcode <= 0x003A:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x0012, opcode - 0x0035, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x0012, opcode - 0x0035, actual_opcode = opcode)
 		elif 0x003B <= opcode <= 0x0041:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, opcode - 0x003B + 0x0015, parameter, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, opcode - 0x003B + 0x0015, parameter, actual_opcode = opcode)
 		elif opcode == 0x0042:
 			cxt.get_statement(VariableDeclarationStatement).set_kind('DIM')
 		elif opcode == 0x0044:
@@ -2532,34 +2958,34 @@ class QBFileVersion40(QBFileVersion):
 			cxt.put_declaration().set_name(name, args)
 			cxt.get_statement(VariableDeclarationStatement).set_kind('DIM')
 		elif 0x0045 <= opcode <= 0x0130:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, opcode - 0x0045 + 0x001C, parameter, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, opcode - 0x0045 + 0x001C, parameter, actual_opcode = opcode)
 		elif opcode == 0x0131:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x0108, parameter = 4, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x0108, parameter = 4, actual_opcode = opcode)
 		elif opcode == 0x0132:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x0109, parameter, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x0109, parameter, actual_opcode = opcode)
 		elif opcode == 0x0133:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x0108, parameter = 1, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x0108, parameter = 1, actual_opcode = opcode)
 		elif opcode == 0x0134:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x0108, parameter = 2, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x0108, parameter = 2, actual_opcode = opcode)
 		elif opcode == 0x0135:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x010A, parameter, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x010A, parameter, actual_opcode = opcode)
 		elif opcode == 0x0136:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x010B, parameter, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x010B, parameter, actual_opcode = opcode)
 		elif opcode == 0x0137:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x0108, parameter = 3, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x0108, parameter = 3, actual_opcode = opcode)
 		elif 0x0138 <= opcode <= 0x018F:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, opcode - 0x0138 + 0x010C, parameter, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, opcode - 0x0138 + 0x010C, parameter, actual_opcode = opcode)
 		elif 0x0190 <= opcode <= 0x019A:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, 0x0164, parameter = opcode - 0x0190, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, 0x0164, parameter = opcode - 0x0190, actual_opcode = opcode)
 		elif 0x019B <= opcode <= 0x01AF:
-			super(QBFileVersion40, self).parse_opcode(cxt, file, opcode - 0x019B + 0x0165, parameter, actual_opcode = opcode)
+			super(BasicFileVersionQB40, self).parse_opcode(cxt, file, opcode - 0x019B + 0x0165, parameter, actual_opcode = opcode)
 		else:
 			raise Exception(f"Invalid opcode {opcode:04X}")
 
-class QBFileVersion45(QBFileVersion):
+class BasicFileVersionQB45(BasicFileVersion):
 	VERSION_STAMP = 0x0100
 	def get_version_stamp(self):
-		return QBFileVersion45.VERSION_STAMP
+		return BasicFileVersionQB45.VERSION_STAMP
 
 	def get_header_size(self):
 		return 0x1C
@@ -2584,10 +3010,10 @@ class QBFileVersion45(QBFileVersion):
 		else:
 			raise Exception("Invalid built-in type")
 
-class QBFileVersion70(QBFileVersion):
+class BasicFileVersionQB70(BasicFileVersion):
 	VERSION_STAMP = 0x0101
 	def get_version_stamp(self):
-		return QBFileVersion70.VERSION_STAMP
+		return BasicFileVersionQB70.VERSION_STAMP
 
 	def get_header_size(self):
 		return 0x1D
@@ -2614,10 +3040,10 @@ class QBFileVersion70(QBFileVersion):
 		else:
 			raise Exception("Invalid built-in type")
 
-class QBFileVersion71(QBFileVersion):
+class BasicFileVersionQB71(BasicFileVersion):
 	VERSION_STAMP = 0x0102
 	def get_version_stamp(self):
-		return QBFileVersion71.VERSION_STAMP
+		return BasicFileVersionQB71.VERSION_STAMP
 
 	def get_header_size(self):
 		return 0x1D
@@ -2644,7 +3070,7 @@ class QBFileVersion71(QBFileVersion):
 		else:
 			raise Exception("Invalid built-in type")
 
-class QBFileVersionVB(QBFileVersion):
+class BasicFileVersionVBDOS(BasicFileVersion):
 	VERSION_STAMP = 0x0108
 
 	METHOD_NAMES = {
@@ -2669,7 +3095,7 @@ class QBFileVersionVB(QBFileVersion):
 	}
 
 	def get_version_stamp(self):
-		return QBFileVersionVB.VERSION_STAMP
+		return BasicFileVersionVBDOS.VERSION_STAMP
 
 	def get_header_size(self):
 		return 0x20 # plus additional values
@@ -2699,10 +3125,142 @@ class QBFileVersionVB(QBFileVersion):
 		else:
 			raise Exception("Invalid built-in type")
 
+	def parse_form_layout(self, qbfile, file):
+		global VBDOS_CONTROL_TYPES
+
+		file.seek(0x16, os.SEEK_SET)
+		form_flags = read8(file)
+		file.seek(5, os.SEEK_CUR)
+		names_offset = read16(file)
+		records_length = read16(file)
+		records_offset = file.tell()
+
+		file.seek(0x16 + names_offset, os.SEEK_SET)
+		Names = []
+		while True:
+			Name_offset = file.tell()
+			unknown_offset = read16(file)
+			ctltype = read8(file)
+			length = read8(file)
+			Name = file.read(length).decode('cp437')
+			Names.append((Name, Name_offset, unknown_offset, ctltype))
+			if unknown_offset == 0:
+				break
+
+		controls = {}
+
+		file.seek(records_offset, os.SEEK_SET)
+		while file.tell() + 2 < records_offset + records_length: # if only 2 bytes are left, ignore
+			ctloffset = file.tell()
+
+			try:
+				index = read8(file)
+				ctltype = read8(file)
+				ctltype_name, ctltype_length, ctltype_fields = VBDOS_CONTROL_TYPES[ctltype]
+				Name, Name_offset, unknown_offset, ctltype2 = Names[index]
+			except:
+				# if accessing the control type and name fails, probably end of structures
+				break
+
+			if ctloffset + ctltype_length > records_offset + records_length:
+				# if record type goes beyond the limit, probably end of structures
+				break
+
+			if ctltype_name == 'Form' and (form_flags & 0x04) != 0:
+				ctltype_name = 'MDIForm'
+
+			control = Object(Name, ctltype_name)
+
+			file.seek(ctloffset + 2, os.SEEK_SET)
+
+			for field in ctltype_fields:
+				if type(field) is int:
+					file.seek(field, os.SEEK_CUR)
+				else:
+					size, datatype, name = field
+					if size == 1:
+						value = read8(file)
+					elif size == 2:
+						value = read16(file)
+					else:
+						assert False
+					if datatype == 'BOOLEAN' and type(name) is list:
+						for bitindex, bitname in enumerate(name):
+							if bitname is not None:
+								control.attributes[bitname] = Attribute(bitname, datatype, -1 if ((value >> bitindex) & 1) != 0 else 0)
+					elif datatype == 'STRING':
+						offset = file.tell()
+						file.seek(0x16 + value, os.SEEK_SET)
+						value = reads(file)
+						file.seek(offset, os.SEEK_SET)
+						control.attributes[name] = Attribute(name, datatype, value)
+					else:
+						if datatype != 'UNSIGNED':
+							if size == 1 and (value & 0x80) != 0:
+								value = (value & 0xFF) - 0x100
+							elif size == 2 and (value & 0x8000) != 0:
+								value = (value & 0xFFFF) - 0x10000
+						control.attributes[name] = Attribute(name, datatype, value)
+
+			file.seek(ctloffset + ctltype_length, os.SEEK_SET)
+
+			if 'WindowState' in control.attributes:
+				# the interpretation of the Left/Top/Heigh/Width properties for Forms depends on the WindowState
+				if control.attributes['WindowState'].value == 0:
+					control.attributes['Left']   = Attribute('Left',   'CHAR', control.attributes['*Left'].value)
+					control.attributes['Top']    = Attribute('Top',    'CHAR', control.attributes['*Top'].value)
+					control.attributes['Height'] = Attribute('Height', 'CHAR', control.attributes['*Height'].value)
+					control.attributes['Width']  = Attribute('Width',  'CHAR', control.attributes['*Width'].value)
+				elif control.attributes['WindowState'].value == 1:
+					control.attributes['Left']   = Attribute('Left',   'CHAR', 3) # seems to be the default
+					control.attributes['Top']    = Attribute('Top',    'CHAR', 22) # seems to be the default
+					control.attributes['Height'] = Attribute('Height', 'CHAR', control.attributes['&Height'].value + 2)
+					control.attributes['Width']  = Attribute('Width',  'CHAR', control.attributes['&Width'].value + 2)
+				elif control.attributes['WindowState'].value == 2:
+					control.attributes['Left']   = Attribute('Left',   'CHAR', 0)
+					control.attributes['Top']    = Attribute('Top',    'CHAR', 0)
+					control.attributes['Height'] = Attribute('Height', 'CHAR', control.attributes['&Height'].value + 2)
+					control.attributes['Width']  = Attribute('Width',  'CHAR', control.attributes['&Width'].value + 2)
+
+			if '&Index' in control.attributes and 'Index' in control.attributes and control.attributes['&Index'].value == 0:
+				# not a control array, hide Index
+				control.attributes['Index'].present = False
+
+			if ctltype_name == 'MDIForm':
+				control.attributes['WindowState'].present = False
+
+			if ctltype_name == 'Menu' and ord('\t') in control.attributes['Caption'].value:
+				# parse the shortcut string
+				control.attributes['Caption'].value, shortcut_text = control.attributes['Caption'].value.split(b'\t')
+				shortcut_text = shortcut_text.decode('cp437')
+				value = ''
+				if shortcut_text.startswith('Shift+'):
+					value += '+'
+					shortcut_text = shortcut_text[len('Shift+'):]
+				if shortcut_text.startswith('Ctrl+'):
+					value += '^'
+					shortcut_text = shortcut_text[len('Ctrl+'):]
+				if shortcut_text.startswith('F'):
+					value += '{' + shortcut_text + '}'
+				else:
+					value += shortcut_text
+				control.attributes['Shortcut'] = Attribute('Shortcut', 'SHORTCUT', value)
+
+			if len(controls) == 0:
+				qbfile.main_form = control
+			controls[ctloffset] = control
+
+		for control in controls.values():
+			if '~' in control.attributes and control.attributes['~'].value != 0:
+				controls[0x16 + control.attributes['~'].value].members.append(control)
+
 	def parse_header(self, qbfile, file):
 		file.seek(0x14, os.SEEK_SET)
-		qbfile.header_size += read16(file)
-		super(QBFileVersionVB, self).parse_header(qbfile, file)
+		header_extra = read16(file)
+		qbfile.header_size += header_extra
+		if header_extra > 0:
+			self.parse_form_layout(qbfile, file)
+		super(BasicFileVersionVBDOS, self).parse_header(qbfile, file)
 
 class QBParseContext:
 	def __init__(self, qbfile):
@@ -2857,18 +3415,18 @@ class QBParseContext:
 		name_offset = read16(file)
 		return self.qbfile.readvar(file, name_offset)
 
-class QBFile:
+class BasicFile:
 	VERSIONS = {
-		'40': QBFileVersion40,
-		'45': QBFileVersion45,
-		'70': QBFileVersion70,
-		'71': QBFileVersion71,
-		'vb': QBFileVersionVB,
+		'40': BasicFileVersionQB40,
+		'45': BasicFileVersionQB45,
+		'70': BasicFileVersionQB70,
+		'71': BasicFileVersionQB71,
+		'vb': BasicFileVersionVBDOS,
 	}
 	def __init__(self, version):
 		if type(version) is str:
-			version = QBFile.VERSIONS[version.lower()]()
-		assert isinstance(version, QBFileVersion)
+			version = BasicFile.VERSIONS[version.lower()]()
+		assert isinstance(version, BasicFileVersion)
 		self.version = version
 		self.variables = {} # name to offset
 		self.variable_names = {} # offsets to names
@@ -2876,6 +3434,7 @@ class QBFile:
 		self.procedures_offset = self.version.get_default_procedure_offset()
 		self.header_size = self.version.get_header_size()
 		self.procedures = [Procedure()]
+		self.main_form = None # only for VBDOS
 		self.parse_context = QBParseContext(self)
 
 	def __repr__(self):
@@ -2900,15 +3459,15 @@ class QBFile:
 			raise Exception("Invalid signature")
 		version_number = read16(file)
 		version = {
-			0x0013: QBFileVersion40,
-			0x0100: QBFileVersion45,
-			0x0101: QBFileVersion70,
-			0x0102: QBFileVersion71,
-			0x0108: QBFileVersionVB,
+			BasicFileVersionQB40.VERSION_STAMP:  BasicFileVersionQB40,
+			BasicFileVersionQB45.VERSION_STAMP:  BasicFileVersionQB45,
+			BasicFileVersionQB70.VERSION_STAMP:  BasicFileVersionQB70,
+			BasicFileVersionQB71.VERSION_STAMP:  BasicFileVersionQB71,
+			BasicFileVersionVBDOS.VERSION_STAMP: BasicFileVersionVBDOS,
 		}.get(version_number)
 		if version is None:
 			raise Exception("Invalid file version")
-		qbfile = QBFile(version())
+		qbfile = BasicFile(version())
 		try:
 			qbfile.parse_versioned_binary(file)
 		except Exception as e:
@@ -2953,6 +3512,9 @@ class QBFile:
 		return Identifier(name, name_offset)
 
 	def print(self, file = None, **kwds):
+		if self.main_form is not None:
+			print("Version 1.00", file = file)
+			self.main_form.print(file = file)
 		for procedure in self.procedures:
 			if procedure.kind is not None:
 				print(file = file)
@@ -2960,7 +3522,7 @@ class QBFile:
 
 def main():
 	with open(sys.argv[1], 'rb') as file:
-		qbfile = QBFile.parse_binary(file)
+		qbfile = BasicFile.parse_binary(file)
 		#print(qbfile)
 		qbfile.print()
 
